@@ -1,144 +1,117 @@
 # Manga Chef — golangci-lint configuration
 # Docs: https://golangci-lint.run/usage/configuration/
-# Minimum golangci-lint version: v1.57
-
-version: "2"
+# Compatible with golangci-lint v1.57.x (v1 config schema — no top-level version key)
 
 run:
-  # Timeout for the entire lint run.
   timeout: 5m
-
-  # Only lint Go files in these directories.
-  # Exclude generated mocks from linting.
-  exclude-dirs:
+  skip-dirs:
     - vendor
-  exclude-files:
+  skip-files:
     - "mock_.*\\.go$"
 
 linters:
-  # Disable all linters by default, then enable explicitly.
-  # This prevents surprise failures when golangci-lint adds new linters.
-  default: none
+  disable-all: true
   enable:
     # --- Correctness ---
-    - errcheck       # Checks that errors are handled, not silently dropped
-    - govet          # Reports suspicious constructs (printf format mismatches, etc.)
-    - staticcheck    # Comprehensive static analysis (supersedes megacheck)
-    - gosimple       # Suggests simplifications to code
-    - unused         # Reports unexported identifiers that are never used
-    - ineffassign    # Detects assignments whose values are never used
+    - errcheck
+    - govet
+    - staticcheck
+    - gosimple
+    - unused
+    - ineffassign
 
     # --- Style & Consistency ---
-    - gofmt          # Enforces standard Go formatting (fail if ungofmt'd)
-    - goimports      # Enforces import grouping: stdlib / external / internal
-    - misspell       # Catches common English spelling mistakes in comments/strings
-    - whitespace     # Checks for unnecessary blank lines at start/end of blocks
+    - gofmt
+    - goimports
+    - misspell
+    - whitespace
 
     # --- Bugs & Safety ---
-    - bodyclose      # Checks HTTP response body is closed (prevents goroutine leaks)
-    - contextcheck   # Ensures context.Context is passed correctly, not stored in structs
-    - noctx          # Prevents http.NewRequest without context (use NewRequestWithContext)
-    - rowserrcheck   # Checks sql.Rows.Err() is checked after iteration
-    - sqlclosecheck  # Checks sql.Rows and sql.Stmt are closed
-    - exhaustive     # Checks exhaustiveness of enum switches (important for scraper type switches)
+    - bodyclose
+    - contextcheck
+    - noctx
+    - rowserrcheck
+    - sqlclosecheck
+    - exhaustive
 
     # --- Complexity ---
-    - cyclop         # Cyclomatic complexity — keep functions understandable
-    - funlen         # Function length — flag functions that are too long
-    - gocognit       # Cognitive complexity — more nuanced than cyclomatic
+    - cyclop
+    - funlen
+    - gocognit
 
     # --- Go Idioms ---
-    - gocritic       # Opinionated set of Go best-practice checks
-    - godot          # Comment sentences should end with a period
-    - wrapcheck      # Errors from external packages should be wrapped with context
+    - gocritic
+    - godot
+    - wrapcheck
 
 linters-settings:
-  # errcheck: also check for unchecked errors in type assertions
   errcheck:
     check-type-assertions: true
     check-blank: true
 
-  # goimports: enforce import grouping order
   goimports:
     local-prefixes: github.com/ducminhgd/manga-chef
 
-  # cyclop: max cyclomatic complexity per function
   cyclop:
     max-complexity: 15
     skip-tests: true
 
-  # funlen: max lines and statements per function
   funlen:
     lines: 80
     statements: 50
     ignore-comments: true
 
-  # gocognit: max cognitive complexity per function
   gocognit:
     min-complexity: 20
 
-  # gocritic: enable extra checks beyond the default set
   gocritic:
     enabled-tags:
       - diagnostic
       - style
       - performance
     disabled-checks:
-      - commentedOutCode   # We sometimes comment code during development
+      - commentedOutCode
 
-  # godot: require period at end of top-level comments (doc comments)
   godot:
     scope: toplevel
     period: true
 
-  # wrapcheck: ensure errors from these packages are wrapped
   wrapcheck:
     ignorePackageGlobs:
       - encoding/*
-      - github.com/ducminhgd/manga-chef/*   # internal errors don't need re-wrapping
+      - github.com/ducminhgd/manga-chef/*
 
-  # exhaustive: require default case in switches over custom types
   exhaustive:
     default-signifies-exhaustive: true
 
-  # staticcheck: enable all SA checks plus style and correctness
   staticcheck:
     checks:
       - "all"
-      - "-ST1000"   # Allow packages without package-level doc comment (internal packages)
-      - "-ST1020"   # Don't require all exported functions to have doc comments (too strict for internal)
+      - "-ST1000"
+      - "-ST1020"
 
 issues:
-  # Maximum number of issues per linter to report.
   max-issues-per-linter: 50
   max-same-issues: 10
-
-  # Don't fail on new issues introduced before this baseline was set up.
-  # Remove this once the initial codebase is clean.
   new: false
 
   exclude-rules:
-    # Test files have relaxed rules.
     - path: "_test\\.go$"
       linters:
-        - funlen       # Test functions with many table cases are naturally long
-        - gocognit     # Test helper logic can be verbose
-        - wrapcheck    # Test assertions don't need wrapping
-        - godot        # Test names don't need periods
+        - funlen
+        - gocognit
+        - wrapcheck
+        - godot
 
-    # cmd/ is allowed to be slightly more imperative (main wiring, flag parsing).
     - path: "^cmd/"
       linters:
         - wrapcheck
         - cyclop
 
-    # Ignore "error return value not checked" for defer Close() calls.
-    # These are intentional: we can't do anything useful with a close error.
     - linters:
         - errcheck
       text: "Error return value of `.*\\.Close\\(\\)` is not checked"
 
-    # Allow named return values in interface implementations (common Go pattern).
     - linters:
         - gocritic
       text: "namedReturn"

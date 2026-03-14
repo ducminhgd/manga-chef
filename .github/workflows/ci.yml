@@ -1,22 +1,9 @@
 name: CI
 
-# Triggers:
-#   - Every push to main (post-merge gate)
-#   - Every pull request targeting main (pre-merge gate)
-#
-# Jobs (run in parallel where possible):
-#   fmt    → gofmt check (fast fail — no point linting unformatted code)
-#   lint   → golangci-lint (needs: fmt)
-#   test   → go test -race + coverage report (needs: fmt)
-#
-# The lint and test jobs run in parallel after fmt passes.
-# A branch protection rule should require all three jobs to pass before merge.
-
 on:
   push:
     branches:
       - main
-    # Don't trigger CI on doc-only changes (saves runner minutes).
     paths-ignore:
       - "**.md"
       - "docs/**"
@@ -33,8 +20,6 @@ on:
       - ".github/ISSUE_TEMPLATE/**"
       - ".github/PULL_REQUEST_TEMPLATE.md"
 
-# Cancel in-flight runs for the same branch when a new push arrives.
-# This avoids wasting runner minutes on outdated commits during active development.
 concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
@@ -45,7 +30,6 @@ env:
 
 jobs:
   # ── Job 1: Format Check ──────────────────────────────────────────────────────
-  # Fast fail: runs in ~5s. If code isn't formatted, skip lint and test entirely.
   fmt:
     name: Format Check
     runs-on: ubuntu-latest
@@ -63,8 +47,6 @@ jobs:
         run: bash scripts/check-fmt.sh
 
   # ── Job 2: Lint ──────────────────────────────────────────────────────────────
-  # Runs golangci-lint with the project's .golangci.yml config.
-  # Uses the official golangci-lint action for correct caching behaviour.
   lint:
     name: Lint
     runs-on: ubuntu-latest
@@ -83,12 +65,9 @@ jobs:
         uses: golangci/golangci-lint-action@v6
         with:
           version: ${{ env.GOLANGCI_LINT_VERSION }}
-          # Pass the config file explicitly so the action doesn't search for one.
           args: --config=.golangci.yml --timeout=5m
 
   # ── Job 3: Test ──────────────────────────────────────────────────────────────
-  # Runs the full unit test suite with the race detector.
-  # Generates a coverage report and posts it to the job summary.
   test:
     name: Test (race detector)
     runs-on: ubuntu-latest
@@ -107,26 +86,33 @@ jobs:
         run: go mod download
 
       - name: Verify go.sum is up to date
-        # Catches cases where go.mod was edited but go.sum wasn't regenerated.
         run: go mod verify
 
       - name: Run tests with race detector
+        # Run all packages but collect coverage only for packages that have
+        # test files. Packages without tests (cmd/manga-chef, pkg/sources,
+        # internal/version) cause "no such tool covdata" errors in Go 1.20+
+        # when -coverprofile is used with ./... because the coverage binary
+        # merge tool is not available for packages with zero test binaries.
         run: |
+          # First pass: run all tests with race detector (no coverage).
+          # This ensures cmd/, pkg/, and other test-less packages still compile.
+          go test -race -count=1 -timeout=120s ./...
+
+          # Second pass: coverage only for packages that have _test.go files.
+          # go list -f '{{if .TestGoFiles}}{{.ImportPath}}{{end}}' filters these out.
+          TEST_PKGS=$(go list -f '{{if .TestGoFiles}}{{.ImportPath}}{{end}}' ./... | tr '\n' ' ')
           go test \
-            -race \
             -count=1 \
             -timeout=120s \
             -coverprofile=coverage.out \
             -covermode=atomic \
-            ./...
+            $TEST_PKGS
 
-      - name: Generate coverage report (text summary)
-        # Writes a per-package coverage table to stdout.
+      - name: Generate coverage report
         run: go tool cover -func=coverage.out
 
       - name: Post coverage summary to job summary
-        # Makes the coverage percentage visible directly in the GitHub Actions UI
-        # without having to click into the logs.
         run: |
           echo "## 📊 Test Coverage" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
@@ -135,8 +121,6 @@ jobs:
           echo '```' >> $GITHUB_STEP_SUMMARY
 
       - name: Upload coverage artifact
-        # Retained for 7 days. Allows downloading the raw coverage.out file
-        # for local HTML report generation: go tool cover -html=coverage.out
         uses: actions/upload-artifact@v4
         with:
           name: coverage-report
