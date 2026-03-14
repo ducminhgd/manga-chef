@@ -8,8 +8,9 @@ import (
 	"log/slog"
 	"os"
 
-	"github.com/ducminhgd/manga-chef/internal/version"
 	"github.com/spf13/cobra"
+
+	"github.com/ducminhgd/manga-chef/internal/version"
 )
 
 // rootFlags holds the values of the persistent root-level flags so they can

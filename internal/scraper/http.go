@@ -27,7 +27,7 @@ type HTTPClient interface {
 //   - Does not follow redirects automatically (scrapers handle them explicitly
 //     when needed, preventing redirect loops on some CDN servers)
 //   - Reuses a shared transport for connection pooling across requests
-func NewHTTPClient(cfg sources.SourceConfig) *http.Client {
+func NewHTTPClient(cfg *sources.SourceConfig) *http.Client {
 	return &http.Client{
 		Timeout: time.Duration(cfg.EffectiveTimeoutS()) * time.Second,
 		CheckRedirect: func(_ *http.Request, via []*http.Request) error {

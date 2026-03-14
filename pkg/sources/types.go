@@ -57,8 +57,8 @@ const (
 
 // IsEnabled returns whether the source is active.
 // Defaults to true when the Enabled field is absent from YAML.
-func (s SourceConfig) IsEnabled() bool {
-	if s.Enabled == nil {
+func (s *SourceConfig) IsEnabled() bool {
+	if s == nil || s.Enabled == nil {
 		return true
 	}
 	return *s.Enabled
@@ -66,8 +66,8 @@ func (s SourceConfig) IsEnabled() bool {
 
 // EffectiveRetries returns the configured retry count, falling back to
 // DefaultRetries when the field is zero or negative.
-func (s SourceConfig) EffectiveRetries() int {
-	if s.Retries <= 0 {
+func (s *SourceConfig) EffectiveRetries() int {
+	if s == nil || s.Retries <= 0 {
 		return DefaultRetries
 	}
 	return s.Retries
@@ -75,8 +75,8 @@ func (s SourceConfig) EffectiveRetries() int {
 
 // EffectiveTimeoutS returns the configured request timeout in seconds,
 // falling back to DefaultTimeoutS when the field is zero or negative.
-func (s SourceConfig) EffectiveTimeoutS() int {
-	if s.TimeoutS <= 0 {
+func (s *SourceConfig) EffectiveTimeoutS() int {
+	if s == nil || s.TimeoutS <= 0 {
 		return DefaultTimeoutS
 	}
 	return s.TimeoutS

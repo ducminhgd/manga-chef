@@ -20,7 +20,7 @@ var ErrScraperNotFound = errors.New("scraper not found")
 //   - Be safe to call multiple times (idempotent construction)
 //   - Return a non-nil ScraperInterface on success
 //   - Return a descriptive error if the config is insufficient to build a scraper
-type Factory func(cfg sources.SourceConfig) (ScraperInterface, error)
+type Factory func(cfg *sources.SourceConfig) (ScraperInterface, error)
 
 // registry is the package-level singleton that stores all registered factories.
 var registry = &scraperRegistry{
@@ -38,7 +38,7 @@ type scraperRegistry struct {
 // Register is intended to be called from package init() functions:
 //
 //	func init() {
-//	    scraper.Register("truyenqq", func(cfg sources.SourceConfig) (ScraperInterface, error) {
+//	    scraper.Register("truyenqq", func(cfg *sources.SourceConfig) (ScraperInterface, error) {
 //	        return truyenqq.New(cfg), nil
 //	    })
 //	}
@@ -69,7 +69,7 @@ func Register(name string, factory Factory) {
 //
 // Returns [ErrScraperNotFound] (unwrappable with errors.Is) when no factory is
 // registered for name. All other errors come from the factory itself.
-func Get(name string, cfg sources.SourceConfig) (ScraperInterface, error) {
+func Get(name string, cfg *sources.SourceConfig) (ScraperInterface, error) {
 	registry.mu.RLock()
 	factory, ok := registry.factories[name]
 	registry.mu.RUnlock()
@@ -87,7 +87,7 @@ func Get(name string, cfg sources.SourceConfig) (ScraperInterface, error) {
 // MustGet is like Get but panics instead of returning an error.
 // Use it only in tests or in init() paths where a missing scraper is
 // unrecoverable.
-func MustGet(name string, cfg sources.SourceConfig) ScraperInterface {
+func MustGet(name string, cfg *sources.SourceConfig) ScraperInterface {
 	s, err := Get(name, cfg)
 	if err != nil {
 		panic(fmt.Sprintf("scraper.MustGet(%q): %v", name, err))

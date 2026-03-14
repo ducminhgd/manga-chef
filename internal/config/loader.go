@@ -28,8 +28,9 @@ import (
 	"path/filepath"
 	"sort"
 
-	"github.com/ducminhgd/manga-chef/pkg/sources"
 	"gopkg.in/yaml.v3"
+
+	"github.com/ducminhgd/manga-chef/pkg/sources"
 )
 
 // sourcesFile is the top-level structure of a sources YAML document.
@@ -77,8 +78,28 @@ func LoadDir(dir string) ([]sources.SourceConfig, error) {
 		return nil, fmt.Errorf("reading sources directory %q: %w", dir, err)
 	}
 
-	// Collect YAML filenames in deterministic order.
-	var yamlFiles []string
+	yamlFiles := collectYAMLFiles(entries, dir)
+	if len(yamlFiles) == 0 {
+		return nil, nil
+	}
+
+	results, allErrs, err := parseSourceFiles(yamlFiles)
+	if err != nil {
+		return nil, err
+	}
+
+	all, allErrs := flattenAndCheckDuplicates(results, allErrs)
+	if allErrs.HasErrors() {
+		return all, allErrs
+	}
+	if len(allErrs) > 0 {
+		return all, allErrs
+	}
+	return all, nil
+}
+
+func collectYAMLFiles(entries []os.DirEntry, dir string) []string {
+	yamlFiles := make([]string, 0, len(entries))
 	for _, e := range entries {
 		if e.IsDir() {
 			continue
@@ -89,39 +110,43 @@ func LoadDir(dir string) ([]sources.SourceConfig, error) {
 		}
 	}
 	sort.Strings(yamlFiles)
+	return yamlFiles
+}
 
-	type fileResult struct {
-		file    string
-		configs []sources.SourceConfig
-	}
+type fileResult struct {
+	file    string
+	configs []sources.SourceConfig
+}
 
+func parseSourceFiles(files []string) ([]fileResult, ValidationErrors, error) {
 	var (
 		results []fileResult
 		allErrs ValidationErrors
 	)
 
-	for _, f := range yamlFiles {
+	for _, f := range files {
 		data, err := os.ReadFile(f)
 		if err != nil {
-			return nil, fmt.Errorf("reading %q: %w", f, err)
+			return nil, nil, fmt.Errorf("reading %q: %w", f, err)
 		}
+
 		cfgs, err := parseFile(data, f, defaultValidator())
 		if err != nil {
 			var ve ValidationErrors
 			if errors.As(err, &ve) {
 				allErrs = append(allErrs, ve...)
-				// Still record the configs so we can detect cross-file duplicates.
 				results = append(results, fileResult{file: f, configs: cfgs})
 				continue
 			}
-			// Hard parse error (malformed YAML) — return immediately.
-			return nil, err
+			return nil, nil, err
 		}
 		results = append(results, fileResult{file: f, configs: cfgs})
 	}
+	return results, allErrs, nil
+}
 
-	// Flatten all configs and check for cross-file duplicate codes.
-	seenCode := make(map[string]string) // code → first file
+func flattenAndCheckDuplicates(results []fileResult, allErrs ValidationErrors) ([]sources.SourceConfig, ValidationErrors) {
+	seenCode := make(map[string]string)
 	var all []sources.SourceConfig
 
 	for _, r := range results {
@@ -140,14 +165,7 @@ func LoadDir(dir string) ([]sources.SourceConfig, error) {
 		}
 	}
 
-	if allErrs.HasErrors() {
-		return all, allErrs
-	}
-	if len(allErrs) > 0 {
-		// Warnings only — return them so the caller can surface them.
-		return all, allErrs
-	}
-	return all, nil
+	return all, allErrs
 }
 
 // parseFile decodes data as a sources YAML document and runs validation.

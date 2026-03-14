@@ -14,7 +14,7 @@
 // Built-in scrapers register themselves in their package's init() function:
 //
 //	func init() {
-//	    scraper.Register("mysource", func(cfg sources.SourceConfig) (ScraperInterface, error) {
+//	    scraper.Register("mysource", func(cfg *sources.SourceConfig) (ScraperInterface, error) {
 //	        return mysource.New(cfg), nil
 //	    })
 //	}

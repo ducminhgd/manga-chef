@@ -7,8 +7,9 @@ import (
 	"regexp"
 	"strings"
 
+	yaml "gopkg.in/yaml.v3"
+
 	"github.com/ducminhgd/manga-chef/pkg/sources"
-	"gopkg.in/yaml.v3"
 )
 
 // codePattern defines the allowed format for source codes:
@@ -65,133 +66,147 @@ func (v *Validator) Validate(cfgs []sources.SourceConfig, nodeInfos []sourceNode
 		}
 		prefix := fmt.Sprintf("sources[%d]", i)
 
-		// ── name ─────────────────────────────────────────────────────────
-		if strings.TrimSpace(cfg.Name) == "" {
-			errs = append(errs, ValidationError{
-				Severity: SeverityError,
-				File:     file,
-				Line:     ni.nameLine,
-				Field:    prefix + ".name",
-				Message:  "name is required",
-			})
-		}
-
-		// ── T-15.1: code ─────────────────────────────────────────────────
-		switch {
-		case strings.TrimSpace(cfg.Code) == "":
-			errs = append(errs, ValidationError{
-				Severity: SeverityError,
-				File:     file,
-				Line:     ni.codeLine,
-				Field:    prefix + ".code",
-				Message:  "code is required",
-			})
-
-		case !codePattern.MatchString(cfg.Code):
-			errs = append(errs, ValidationError{
-				Severity: SeverityError,
-				File:     file,
-				Line:     ni.codeLine,
-				Field:    prefix + ".code",
-				Message:  fmt.Sprintf("code %q must contain only lowercase letters, digits, and underscores (no spaces, hyphens, or uppercase)", cfg.Code),
-			})
-
-		default:
-			// T-15.1: check for within-file duplicates.
-			if firstIdx, dup := seenCodes[cfg.Code]; dup {
-				errs = append(errs, ValidationError{
-					Severity: SeverityError,
-					File:     file,
-					Line:     ni.codeLine,
-					Field:    prefix + ".code",
-					Message:  fmt.Sprintf("duplicate code %q — first defined at sources[%d]", cfg.Code, firstIdx),
-				})
-			} else {
-				seenCodes[cfg.Code] = i
-			}
-		}
-
-		// ── T-15.2: base_url ─────────────────────────────────────────────
-		if strings.TrimSpace(cfg.BaseURL) == "" {
-			errs = append(errs, ValidationError{
-				Severity: SeverityError,
-				File:     file,
-				Line:     ni.baseURLLine,
-				Field:    prefix + ".base_url",
-				Message:  "base_url is required",
-			})
-		} else if err := validateURL(cfg.BaseURL); err != nil {
-			errs = append(errs, ValidationError{
-				Severity: SeverityError,
-				File:     file,
-				Line:     ni.baseURLLine,
-				Field:    prefix + ".base_url",
-				Message:  fmt.Sprintf("invalid URL: %s", err),
-			})
-		}
-
-		// ── T-15.3: scraper ──────────────────────────────────────────────
-		if strings.TrimSpace(cfg.Scraper) == "" {
-			errs = append(errs, ValidationError{
-				Severity: SeverityError,
-				File:     file,
-				Line:     ni.scraperLine,
-				Field:    prefix + ".scraper",
-				Message:  "scraper is required — use a built-in name (e.g. \"generic\") or a plugin file path",
-			})
-		} else if isFilePath(cfg.Scraper) {
-			// File path: must exist on disk.
-			if _, err := os.Stat(cfg.Scraper); os.IsNotExist(err) {
-				errs = append(errs, ValidationError{
-					Severity: SeverityError,
-					File:     file,
-					Line:     ni.scraperLine,
-					Field:    prefix + ".scraper",
-					Message:  fmt.Sprintf("scraper plugin file %q does not exist", cfg.Scraper),
-				})
-			}
-		} else if len(v.KnownScrapers) > 0 && !v.isKnownScraper(cfg.Scraper) {
-			// Built-in name: validate only when registry is populated.
-			errs = append(errs, ValidationError{
-				Severity: SeverityError,
-				File:     file,
-				Line:     ni.scraperLine,
-				Field:    prefix + ".scraper",
-				Message:  fmt.Sprintf("unknown scraper %q — known scrapers: %s", cfg.Scraper, strings.Join(v.KnownScrapers, ", ")),
-			})
-		}
-
-		// ── T-15.4: rate_limit_ms warning for HTML sources ───────────────
-		if cfg.RateLimitMs == 0 && !apiScrapers[cfg.Scraper] && !isFilePath(cfg.Scraper) {
-			errs = append(errs, ValidationError{
-				Severity: SeverityWarning,
-				File:     file,
-				Line:     ni.scraperLine,
-				Field:    prefix + ".rate_limit_ms",
-				Message:  "rate_limit_ms is not set — consider adding a delay (e.g. 500ms) to avoid overloading HTML sources",
-			})
-		}
-
-		// ── selectors required for generic scraper ───────────────────────
-		if cfg.Scraper == "generic" && cfg.Selectors == nil {
-			errs = append(errs, ValidationError{
-				Severity: SeverityError,
-				File:     file,
-				Line:     ni.scraperLine,
-				Field:    prefix + ".selectors",
-				Message:  `scraper "generic" requires a selectors block`,
-			})
-		}
+		v.validateName(&errs, cfg.Name, file, ni.nameLine, prefix)
+		v.validateCode(&errs, cfg.Code, file, ni.codeLine, prefix, i, seenCodes)
+		v.validateBaseURL(&errs, cfg.BaseURL, file, ni.baseURLLine, prefix)
+		v.validateScraper(&errs, cfg.Scraper, file, ni.scraperLine, prefix)
+		v.validateRateLimit(&errs, cfg.RateLimitMs, cfg.Scraper, file, ni.scraperLine, prefix)
+		v.validateSelectors(&errs, cfg.Scraper, cfg.Selectors, file, ni.scraperLine, prefix)
 	}
 
 	return errs
+}
+
+func (v *Validator) validateName(errs *ValidationErrors, name, file string, line int, prefix string) {
+	if strings.TrimSpace(name) == "" {
+		*errs = append(*errs, ValidationError{
+			Severity: SeverityError,
+			File:     file,
+			Line:     line,
+			Field:    prefix + ".name",
+			Message:  "name is required",
+		})
+	}
+}
+
+func (v *Validator) validateCode(errs *ValidationErrors, code, file string, line int, prefix string, idx int, seenCodes map[string]int) {
+	switch {
+	case strings.TrimSpace(code) == "":
+		*errs = append(*errs, ValidationError{
+			Severity: SeverityError,
+			File:     file,
+			Line:     line,
+			Field:    prefix + ".code",
+			Message:  "code is required",
+		})
+	case !codePattern.MatchString(code):
+		*errs = append(*errs, ValidationError{
+			Severity: SeverityError,
+			File:     file,
+			Line:     line,
+			Field:    prefix + ".code",
+			Message:  fmt.Sprintf("code %q must contain only lowercase letters, digits, and underscores (no spaces, hyphens, or uppercase)", code),
+		})
+	default:
+		if firstIdx, dup := seenCodes[code]; dup {
+			*errs = append(*errs, ValidationError{
+				Severity: SeverityError,
+				File:     file,
+				Line:     line,
+				Field:    prefix + ".code",
+				Message:  fmt.Sprintf("duplicate code %q — first defined at sources[%d]", code, firstIdx),
+			})
+		} else {
+			seenCodes[code] = idx
+		}
+	}
+}
+
+func (v *Validator) validateBaseURL(errs *ValidationErrors, baseURL, file string, line int, prefix string) {
+	if strings.TrimSpace(baseURL) == "" {
+		*errs = append(*errs, ValidationError{
+			Severity: SeverityError,
+			File:     file,
+			Line:     line,
+			Field:    prefix + ".base_url",
+			Message:  "base_url is required",
+		})
+	} else if err := validateURL(baseURL); err != nil {
+		*errs = append(*errs, ValidationError{
+			Severity: SeverityError,
+			File:     file,
+			Line:     line,
+			Field:    prefix + ".base_url",
+			Message:  fmt.Sprintf("invalid URL: %s", err),
+		})
+	}
+}
+
+func (v *Validator) validateScraper(errs *ValidationErrors, scraper, file string, line int, prefix string) {
+	if strings.TrimSpace(scraper) == "" {
+		*errs = append(*errs, ValidationError{
+			Severity: SeverityError,
+			File:     file,
+			Line:     line,
+			Field:    prefix + ".scraper",
+			Message:  "scraper is required — use a built-in name (e.g. \"generic\") or a plugin file path",
+		})
+		return
+	}
+
+	if isFilePath(scraper) {
+		if _, err := os.Stat(scraper); os.IsNotExist(err) {
+			*errs = append(*errs, ValidationError{
+				Severity: SeverityError,
+				File:     file,
+				Line:     line,
+				Field:    prefix + ".scraper",
+				Message:  fmt.Sprintf("scraper plugin file %q does not exist", scraper),
+			})
+		}
+		return
+	}
+
+	if len(v.KnownScrapers) > 0 && !v.isKnownScraper(scraper) {
+		*errs = append(*errs, ValidationError{
+			Severity: SeverityError,
+			File:     file,
+			Line:     line,
+			Field:    prefix + ".scraper",
+			Message:  fmt.Sprintf("unknown scraper %q — known scrapers: %s", scraper, strings.Join(v.KnownScrapers, ", ")),
+		})
+	}
+}
+
+func (v *Validator) validateRateLimit(errs *ValidationErrors, rateLimit int, scraper, file string, line int, prefix string) {
+	if rateLimit == 0 && !apiScrapers[scraper] && !isFilePath(scraper) {
+		*errs = append(*errs, ValidationError{
+			Severity: SeverityWarning,
+			File:     file,
+			Line:     line,
+			Field:    prefix + ".rate_limit_ms",
+			Message:  "rate_limit_ms is not set — consider adding a delay (e.g. 500ms) to avoid overloading HTML sources",
+		})
+	}
+}
+
+func (v *Validator) validateSelectors(errs *ValidationErrors, scraper string, selectors *sources.Selectors, file string, line int, prefix string) {
+	if scraper == "generic" && selectors == nil {
+		*errs = append(*errs, ValidationError{
+			Severity: SeverityError,
+			File:     file,
+			Line:     line,
+			Field:    prefix + ".selectors",
+			Message:  `scraper "generic" requires a selectors block`,
+		})
+	}
 }
 
 // validateURL returns an error if s is not an absolute HTTP or HTTPS URL.
 func validateURL(s string) error {
 	u, err := url.ParseRequestURI(s)
 	if err != nil {
-		return err
+		return fmt.Errorf("parsing URL: %w", err)
 	}
 	if u.Scheme != "http" && u.Scheme != "https" {
 		return fmt.Errorf("scheme must be http or https, got %q", u.Scheme)
@@ -224,7 +239,7 @@ func (v *Validator) isKnownScraper(name string) bool {
 	return false
 }
 
-// ── yaml.Node helpers ────────────────────────────────────────────────────────
+// ── yaml.Node helpers ────────────────────────────────────────────────────────.
 
 // extractNodeInfos builds a []sourceNodeInfo aligned with the sources sequence
 // in the YAML node tree. Index i corresponds to the i-th source entry.

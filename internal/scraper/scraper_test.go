@@ -7,10 +7,11 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/ducminhgd/manga-chef/internal/scraper"
-	"github.com/ducminhgd/manga-chef/pkg/sources"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/ducminhgd/manga-chef/internal/scraper"
+	"github.com/ducminhgd/manga-chef/pkg/sources"
 )
 
 // ── Compile-time interface satisfaction checks ────────────────────────────────
@@ -104,7 +105,7 @@ func TestMockScraper_UnmetExpectation_FailsTest(t *testing.T) {
 func TestMockHTTPClient_Do_ReturnsConfiguredResponse(t *testing.T) {
 	m := scraper.NewMockHTTPClient(t)
 	req, err := http.NewRequestWithContext(
-		context.Background(), http.MethodGet, "https://example.com", nil)
+		context.Background(), http.MethodGet, "https://example.com", http.NoBody)
 	require.NoError(t, err)
 
 	want := &http.Response{
@@ -115,19 +116,23 @@ func TestMockHTTPClient_Do_ReturnsConfiguredResponse(t *testing.T) {
 
 	got, err := m.Do(req)
 	require.NoError(t, err)
+	defer got.Body.Close()
 	assert.Equal(t, http.StatusOK, got.StatusCode)
 }
 
 func TestMockHTTPClient_Do_ReturnsError(t *testing.T) {
 	m := scraper.NewMockHTTPClient(t)
 	req, err := http.NewRequestWithContext(
-		context.Background(), http.MethodGet, "https://example.com", nil)
+		context.Background(), http.MethodGet, "https://example.com", http.NoBody)
 	require.NoError(t, err)
 
 	m.EXPECT().Do(req).Return(nil, assert.AnError)
 
-	_, err = m.Do(req)
+	got, err := m.Do(req)
 	require.Error(t, err)
+	if got != nil && got.Body != nil {
+		_ = got.Body.Close()
+	}
 }
 
 // ── fakeTestingT ─────────────────────────────────────────────────────────────

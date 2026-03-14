@@ -12,9 +12,10 @@ import (
 	"strings"
 	"text/tabwriter"
 
+	"github.com/spf13/cobra"
+
 	"github.com/ducminhgd/manga-chef/internal/config"
 	"github.com/ducminhgd/manga-chef/pkg/sources"
-	"github.com/spf13/cobra"
 )
 
 // NewSourcesCmd returns the "sources" parent command with its sub-commands
@@ -45,7 +46,7 @@ Source files follow this format:
 	return cmd
 }
 
-// ── sources list (T-17) ───────────────────────────────────────────────────────
+// ── sources list (T-17). ─────────────────────────────────────────────────────────.
 
 func newSourcesListCmd(getSourcesPath func() string) *cobra.Command {
 	var showDisabled bool
@@ -115,10 +116,13 @@ func runSourcesList(w io.Writer, sourcesPath string, showDisabled bool) error {
 		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\n",
 			c.Code, c.Name, c.BaseURL, c.Scraper, status)
 	}
-	return tw.Flush()
+	if err := tw.Flush(); err != nil {
+		return fmt.Errorf("writing source table: %w", err)
+	}
+	return nil
 }
 
-// ── sources add (T-18) ────────────────────────────────────────────────────────
+// ── sources add (T-18). ────────────────────────────────────────────────────────.
 
 func newSourcesAddCmd(getSourcesPath func() string) *cobra.Command {
 	var dryRun bool
@@ -146,34 +150,62 @@ Use --dry-run to validate and preview what would be added without writing.`,
 }
 
 func runSourcesAdd(w io.Writer, newFile, sourcesPath string, dryRun bool) error {
-	// ── Step 1: validate the incoming file ──────────────────────────────────
-	newCfgs, err := config.LoadFile(newFile)
+	newCfgs, err := validateSourceFile(w, newFile)
 	if err != nil {
-		var ve config.ValidationErrors
-		if errors.As(err, &ve) {
-			if ve.HasErrors() {
-				return fmt.Errorf("the source file %q has validation errors:\n%w", newFile, err)
-			}
-			// Warnings only — surface them and proceed.
-			for _, w2 := range ve.Warnings() {
-				fmt.Fprintf(w, "warning: %s\n", w2.String())
-			}
-		} else {
-			return fmt.Errorf("reading %q: %w", newFile, err)
-		}
+		return err
 	}
-
 	if len(newCfgs) == 0 {
 		fmt.Fprintf(w, "No sources found in %q — nothing to add.\n", newFile)
 		return nil
 	}
 
-	// ── Step 2: load existing sources to check for duplicate codes ──────────
-	existingCfgs, existErr := loadExisting(sourcesPath)
-	if existErr != nil {
-		return existErr
+	existingCfgs, err := loadExisting(sourcesPath)
+	if err != nil {
+		return err
+	}
+	if err := checkDuplicateCodes(sourcesPath, existingCfgs, newCfgs); err != nil {
+		return err
 	}
 
+	fmt.Fprintf(w, "Sources to be added from %q:\n", newFile)
+	for _, c := range newCfgs {
+		fmt.Fprintf(w, "  + %s (%s) — %s\n", c.Name, c.Code, c.BaseURL)
+	}
+	if dryRun {
+		fmt.Fprintln(w, "\nDry run — no files written.")
+		return nil
+	}
+
+	dest, err := destinationPath(sourcesPath, newFile)
+	if err != nil {
+		return err
+	}
+	if err := copyFile(newFile, dest); err != nil {
+		return fmt.Errorf("writing to %q: %w", dest, err)
+	}
+	fmt.Fprintf(w, "\n✓ Added %d source(s) → %s\n", len(newCfgs), dest)
+	return nil
+}
+
+func validateSourceFile(w io.Writer, newFile string) ([]sources.SourceConfig, error) {
+	newCfgs, err := config.LoadFile(newFile)
+	if err != nil {
+		var ve config.ValidationErrors
+		if errors.As(err, &ve) {
+			if ve.HasErrors() {
+				return nil, fmt.Errorf("the source file %q has validation errors:\n%w", newFile, err)
+			}
+			for _, w2 := range ve.Warnings() {
+				fmt.Fprintf(w, "warning: %s\n", w2.String())
+			}
+			return newCfgs, nil
+		}
+		return nil, fmt.Errorf("reading %q: %w", newFile, err)
+	}
+	return newCfgs, nil
+}
+
+func checkDuplicateCodes(sourcesPath string, existingCfgs, newCfgs []sources.SourceConfig) error {
 	existingCodes := make(map[string]bool, len(existingCfgs))
 	for _, c := range existingCfgs {
 		existingCodes[c.Code] = true
@@ -185,37 +217,14 @@ func runSourcesAdd(w io.Writer, newFile, sourcesPath string, dryRun bool) error 
 			duplicates = append(duplicates, c.Code)
 		}
 	}
-	if len(duplicates) > 0 {
-		return fmt.Errorf(
-			"cannot add: the following source code(s) already exist in %q: %s\n"+
-				"Remove or rename them before adding, or edit the existing config directly.",
-			sourcesPath, strings.Join(duplicates, ", "),
-		)
-	}
-
-	// ── Step 3: preview ──────────────────────────────────────────────────────
-	fmt.Fprintf(w, "Sources to be added from %q:\n", newFile)
-	for _, c := range newCfgs {
-		fmt.Fprintf(w, "  + %s (%s) — %s\n", c.Name, c.Code, c.BaseURL)
-	}
-
-	if dryRun {
-		fmt.Fprintln(w, "\nDry run — no files written.")
+	if len(duplicates) == 0 {
 		return nil
 	}
-
-	// ── Step 4: copy the new file into the sources directory ─────────────────
-	dest, err := destinationPath(sourcesPath, newFile)
-	if err != nil {
-		return err
-	}
-
-	if err := copyFile(newFile, dest); err != nil {
-		return fmt.Errorf("writing to %q: %w", dest, err)
-	}
-
-	fmt.Fprintf(w, "\n✓ Added %d source(s) → %s\n", len(newCfgs), dest)
-	return nil
+	return fmt.Errorf(
+		"cannot add: the following source code(s) already exist in %q: %s\n"+
+			"Remove or rename them before adding, or edit the existing config directly.",
+		sourcesPath, strings.Join(duplicates, ", "),
+	)
 }
 
 // loadExisting returns the current sources from sourcesPath, ignoring
@@ -269,13 +278,13 @@ func destinationPath(sourcesPath, newFile string) (string, error) {
 func copyFile(src, dst string) error {
 	in, err := os.Open(src)
 	if err != nil {
-		return err
+		return fmt.Errorf("opening %q: %w", src, err)
 	}
 	defer in.Close()
 
 	out, err := os.OpenFile(dst, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o640)
 	if err != nil {
-		return err
+		return fmt.Errorf("opening %q: %w", dst, err)
 	}
 	defer out.Close()
 
@@ -284,15 +293,18 @@ func copyFile(src, dst string) error {
 		n, readErr := in.Read(buf)
 		if n > 0 {
 			if _, writeErr := out.Write(buf[:n]); writeErr != nil {
-				return writeErr
+				return fmt.Errorf("writing %q: %w", dst, writeErr)
 			}
 		}
 		if readErr != nil {
 			if readErr == io.EOF {
 				break
 			}
-			return readErr
+			return fmt.Errorf("reading %q: %w", src, readErr)
 		}
 	}
-	return out.Sync()
+	if err := out.Sync(); err != nil {
+		return fmt.Errorf("syncing %q: %w", dst, err)
+	}
+	return nil
 }

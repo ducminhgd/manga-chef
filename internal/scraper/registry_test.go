@@ -6,24 +6,26 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/ducminhgd/manga-chef/internal/scraper"
-	"github.com/ducminhgd/manga-chef/pkg/sources"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/ducminhgd/manga-chef/internal/scraper"
+	"github.com/ducminhgd/manga-chef/pkg/sources"
 )
 
 // ── helpers ──────────────────────────────────────────────────────────────────
 
 // noopFactory returns a factory that builds a no-op scraper.
 func noopFactory() scraper.Factory {
-	return func(cfg sources.SourceConfig) (scraper.ScraperInterface, error) {
+	return func(cfg *sources.SourceConfig) (scraper.ScraperInterface, error) {
+		_ = cfg
 		return &noopScraper{}, nil
 	}
 }
 
 // errorFactory returns a factory that always fails with the given error.
 func errorFactory(err error) scraper.Factory {
-	return func(_ sources.SourceConfig) (scraper.ScraperInterface, error) {
+	return func(_ *sources.SourceConfig) (scraper.ScraperInterface, error) {
 		return nil, err
 	}
 }
@@ -94,14 +96,16 @@ func TestRegister_PanicsOnNilFactory(t *testing.T) {
 
 func TestGet_ReturnsScraperForRegisteredName(t *testing.T) {
 	withRegistered(t, "test_get", noopFactory(), func() {
-		s, err := scraper.Get("test_get", defaultCfg("test_get"))
+		cfg := defaultCfg("test_get")
+		s, err := scraper.Get("test_get", &cfg)
 		require.NoError(t, err)
 		assert.NotNil(t, s)
 	})
 }
 
 func TestGet_ReturnsErrScraperNotFound_ForUnknownName(t *testing.T) {
-	_, err := scraper.Get("does_not_exist_xyz", defaultCfg("does_not_exist_xyz"))
+	cfg := defaultCfg("does_not_exist_xyz")
+	_, err := scraper.Get("does_not_exist_xyz", &cfg)
 	require.Error(t, err)
 	assert.True(t, errors.Is(err, scraper.ErrScraperNotFound),
 		"error should wrap ErrScraperNotFound, got: %v", err)
@@ -110,7 +114,8 @@ func TestGet_ReturnsErrScraperNotFound_ForUnknownName(t *testing.T) {
 func TestGet_ErrorFromFactory_IsWrapped(t *testing.T) {
 	factoryErr := errors.New("missing API key")
 	withRegistered(t, "test_factory_err", errorFactory(factoryErr), func() {
-		_, err := scraper.Get("test_factory_err", defaultCfg("test_factory_err"))
+		cfg := defaultCfg("test_factory_err")
+		_, err := scraper.Get("test_factory_err", &cfg)
 		require.Error(t, err)
 		assert.ErrorIs(t, err, factoryErr,
 			"factory error should be wrapped in the returned error")
@@ -121,8 +126,8 @@ func TestGet_ErrorFromFactory_IsWrapped(t *testing.T) {
 
 func TestGet_PassesConfigToFactory(t *testing.T) {
 	var gotCfg sources.SourceConfig
-	factory := func(cfg sources.SourceConfig) (scraper.ScraperInterface, error) {
-		gotCfg = cfg
+	factory := func(cfg *sources.SourceConfig) (scraper.ScraperInterface, error) {
+		gotCfg = *cfg
 		return &noopScraper{}, nil
 	}
 
@@ -131,7 +136,7 @@ func TestGet_PassesConfigToFactory(t *testing.T) {
 		cfg.BaseURL = "https://special-url.com"
 		cfg.RateLimitMs = 750
 
-		_, err := scraper.Get("test_cfg_pass", cfg)
+		_, err := scraper.Get("test_cfg_pass", &cfg)
 		require.NoError(t, err)
 		assert.Equal(t, "https://special-url.com", gotCfg.BaseURL)
 		assert.Equal(t, 750, gotCfg.RateLimitMs)
@@ -143,7 +148,8 @@ func TestGet_PassesConfigToFactory(t *testing.T) {
 func TestMustGet_ReturnsScraperOnSuccess(t *testing.T) {
 	withRegistered(t, "test_mustget", noopFactory(), func() {
 		assert.NotPanics(t, func() {
-			s := scraper.MustGet("test_mustget", defaultCfg("test_mustget"))
+			cfg := defaultCfg("test_mustget")
+			s := scraper.MustGet("test_mustget", &cfg)
 			assert.NotNil(t, s)
 		})
 	})
@@ -151,7 +157,8 @@ func TestMustGet_ReturnsScraperOnSuccess(t *testing.T) {
 
 func TestMustGet_PanicsOnUnknownName(t *testing.T) {
 	assert.Panics(t, func() {
-		scraper.MustGet("nonexistent_mustget_xyz", defaultCfg("nonexistent_mustget_xyz"))
+		cfg := defaultCfg("nonexistent_mustget_xyz")
+		scraper.MustGet("nonexistent_mustget_xyz", &cfg)
 	})
 }
 
@@ -159,16 +166,21 @@ func TestMustGet_PanicsOnUnknownName(t *testing.T) {
 
 func TestNames_ReturnsSortedNames(t *testing.T) {
 	// Register in reverse alphabetical order; expect sorted output.
-	for _, name := range []string{"zzz_src", "aaa_src", "mmm_src"} {
+	names := []string{"zzz_src", "aaa_src", "mmm_src"}
+	for _, name := range names {
 		scraper.Register(name, noopFactory())
-		defer scraper.UnregisterForTest(name)
 	}
+	defer func() {
+		for _, name := range names {
+			scraper.UnregisterForTest(name)
+		}
+	}()
 
-	names := scraper.Names()
+	sourceNames := scraper.Names()
 
 	// Find our three names in the slice and verify ordering.
 	indexOf := func(s string) int {
-		for i, n := range names {
+		for i, n := range sourceNames {
 			if n == s {
 				return i
 			}
@@ -205,12 +217,12 @@ func TestRegistry_ConcurrentReads(t *testing.T) {
 		var wg sync.WaitGroup
 		for i := 0; i < 50; i++ {
 			wg.Add(1)
-			go func() {
+			go func(cfg sources.SourceConfig) {
 				defer wg.Done()
-				s, err := scraper.Get("test_concurrent", cfg)
+				s, err := scraper.Get("test_concurrent", &cfg)
 				assert.NoError(t, err)
 				assert.NotNil(t, s)
-			}()
+			}(cfg)
 		}
 		wg.Wait()
 	})
