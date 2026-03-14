@@ -1,0 +1,50 @@
+# manga-chef sources configuration — annotated example
+#
+# Copy this file to sources.yml (or pass it with --sources ./my-sources.yml)
+# and fill in the values for the sources you want to use.
+#
+# Default locations searched at startup (in order):
+#   1. Path given by --sources flag
+#   2. ./sources.yml
+#   3. ~/.config/manga-chef/sources.yml
+
+sources:
+  # ---------------------------------------------------------------------------
+  # TruyenQQ — Vietnamese manga aggregator
+  # ---------------------------------------------------------------------------
+  - name: "TruyenQQ"          # Human-readable display name shown in CLI output
+    code: "truyenqq"          # Short unique identifier used with --source flag
+    base_url: "https://truyenqqto.com"   # Root URL; change this to switch mirrors
+    scraper: "truyenqq"       # Maps to the built-in TruyenQQ scraper
+    enabled: true             # Optional. Default: true. Set to false to hide from list
+    headers:                  # Optional. Extra HTTP headers sent with every request
+      Referer: "https://truyenqqto.com"  # Required by TruyenQQ CDN to avoid 403
+      User-Agent: "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36"
+    rate_limit_ms: 500        # Optional. Milliseconds between sequential requests
+    retries: 5                # Optional. Max retry attempts per image. Default: 3
+    timeout_s: 30             # Optional. Per-request timeout in seconds. Default: 30
+
+  # ---------------------------------------------------------------------------
+  # Generic CSS-selector scraper — no-code fallback for simple HTML sites
+  # ---------------------------------------------------------------------------
+  - name: "My Custom Site"
+    code: "mycustomsite"
+    base_url: "https://example-manga.com"
+    scraper: "generic"        # Use the built-in CSS-selector-based scraper
+    rate_limit_ms: 300
+    selectors:
+      chapter_list: "ul.chapter-list a"      # Selector for chapter anchor tags
+      chapter_number: "attr:data-chapter"    # Extract chapter number from attribute
+      image_list: "div.reader-container img" # Selector for image elements
+      image_url: "attr:src"                  # Extract image URL from attribute
+
+  # ---------------------------------------------------------------------------
+  # Custom plugin scraper — for JavaScript-heavy or non-standard sites
+  # ---------------------------------------------------------------------------
+  - name: "Custom Mirror"
+    code: "custom_mirror"
+    base_url: "https://mirror-site.org"
+    scraper: "./scrapers/custom_scraper.go"  # Relative path to a plugin scraper file
+    rate_limit_ms: 1000
+    retries: 3
+
