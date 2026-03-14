@@ -1,0 +1,13 @@
+sources:
+  - name: "Source A"
+    code: "truyenqq"
+    base_url: "https://a.com"
+    scraper: "truyenqq"
+    rate_limit_ms: 300
+
+  - name: "Source B"
+    code: "truyenqq"
+    base_url: "https://b.com"
+    scraper: "truyenqq"
+    rate_limit_ms: 300
+

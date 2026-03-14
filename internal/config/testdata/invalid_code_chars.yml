@@ -1,0 +1,19 @@
+sources:
+  - name: "Source One"
+    code: "My-Source"
+    base_url: "https://one.com"
+    scraper: "scraper_one"
+    rate_limit_ms: 300
+
+  - name: "Source Two"
+    code: "Source 2"
+    base_url: "https://two.com"
+    scraper: "scraper_two"
+    rate_limit_ms: 300
+
+  - name: "Source Three"
+    code: "UPPERCASE"
+    base_url: "https://three.com"
+    scraper: "scraper_three"
+    rate_limit_ms: 300
+

@@ -34,7 +34,7 @@
 
 | #    | Task                                                      | Estimate | Role | Notes                                                                          |
 | ---- | --------------------------------------------------------- | -------- | ---- | ------------------------------------------------------------------------------ |
-| T-01 | Initialize Go module (`github.com/manga-chef/manga-chef`) | XS       | BE   | `go mod init`; set minimum Go version in `go.mod`                              |
+| T-01 | Initialize Go module (`github.com/ducminhgd/manga-chef`) | XS       | BE   | `go mod init`; set minimum Go version in `go.mod`                              |
 | T-02 | Create canonical directory structure                      | XS       | BE   | `cmd/`, `internal/`, `pkg/`, `sources/`, `testdata/`, `scripts/`               |
 | T-03 | Add core dependencies to `go.mod`                         | S        | BE   | `cobra`, `gopkg.in/yaml.v3`, `golang.org/x/net`, `go-epub`, `jung-kurt/gofpdf` |
 | T-04 | Create root `Makefile` with standard targets              | XS       | BE   | `build`, `test`, `test-race`, `lint`, `fmt`, `clean`, `generate`               |

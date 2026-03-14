@@ -1,0 +1,7 @@
+sources:
+  - name: "Generic Without Selectors"
+    code: "generic_no_sel"
+    base_url: "https://example.com"
+    scraper: "generic"
+    rate_limit_ms: 300
+

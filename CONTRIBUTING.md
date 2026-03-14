@@ -44,7 +44,7 @@ git clone https://github.com/<your-username>/manga-chef.git
 cd manga-chef
 
 # Add the upstream remote
-git remote add upstream https://github.com/manga-chef/manga-chef.git
+git remote add upstream https://github.com/ducminhgd/manga-chef.git
 ```
 
 ### Install Dependencies
@@ -331,7 +331,7 @@ import (
     "context"
     "fmt"
 
-    "github.com/manga-chef/manga-chef/pkg/sources"
+    "github.com/ducminhgd/manga-chef/pkg/sources"
 )
 
 type Scraper struct {

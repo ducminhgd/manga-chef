@@ -1,0 +1,6 @@
+sources:
+  - name: "No Rate Limit Source"
+    code: "no_rate_limit"
+    base_url: "https://example.com"
+    scraper: "some_scraper"
+

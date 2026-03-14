@@ -26,7 +26,7 @@ inpackage: true            # Place mock in the same package as the interface
 packages:
   # --- Scraper interface ---
   # Used by: downloader, CLI integration tests
-  github.com/manga-chef/manga-chef/internal/scraper:
+  github.com/ducminhgd/manga-chef/internal/scraper:
     interfaces:
       ScraperInterface:
         config:
@@ -35,7 +35,7 @@ packages:
 
   # --- HTTP client interface ---
   # Used by: all scrapers (TruyenQQ, generic) for test injection
-  github.com/manga-chef/manga-chef/internal/scraper:
+  github.com/ducminhgd/manga-chef/internal/scraper:
     interfaces:
       HTTPClient:
         config:
@@ -44,7 +44,7 @@ packages:
 
   # --- Downloader interface ---
   # Used by: CLI layer tests (verifies correct args are passed)
-  github.com/manga-chef/manga-chef/internal/downloader:
+  github.com/ducminhgd/manga-chef/internal/downloader:
     interfaces:
       Downloader:
         config:
@@ -53,7 +53,7 @@ packages:
 
   # --- Converter interface ---
   # Used by: CLI layer tests (verifies correct format/path args)
-  github.com/manga-chef/manga-chef/internal/converter:
+  github.com/ducminhgd/manga-chef/internal/converter:
     interfaces:
       ConverterInterface:
         config:
@@ -62,7 +62,7 @@ packages:
 
   # --- Progress reporter interface ---
   # Used by: downloader tests (verify progress callbacks are invoked)
-  github.com/manga-chef/manga-chef/internal/downloader:
+  github.com/ducminhgd/manga-chef/internal/downloader:
     interfaces:
       ProgressReporter:
         config:

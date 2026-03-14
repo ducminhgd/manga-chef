@@ -1,0 +1,28 @@
+sources:
+  - name: "TruyenQQ"
+    code: "truyenqq"
+    base_url: "https://truyenqqto.com"
+    scraper: "truyenqq"
+    rate_limit_ms: 500
+    retries: 3
+    timeout_s: 30
+    headers:
+      Referer: "https://truyenqqto.com"
+
+  - name: "MangaDex"
+    code: "mangadex"
+    base_url: "https://api.mangadex.org"
+    scraper: "mangadex"
+    timeout_s: 30
+
+  - name: "Generic Site"
+    code: "generic_site"
+    base_url: "https://example-manga.com"
+    scraper: "generic"
+    rate_limit_ms: 300
+    selectors:
+      chapter_list: "ul.chapters li a"
+      chapter_number: "attr:data-chapter"
+      image_list: "div.reader img"
+      image_url: "attr:src"
+

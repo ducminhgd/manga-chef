@@ -1,0 +1,12 @@
+sources:
+  - name: "TruyenQQ"
+    code: "truyenqq"
+    base_url: "https://truyenqqto.com"
+    scraper: "truyenqq"
+    rate_limit_ms: 500
+    retries: 3
+    timeout_s: 30
+    headers:
+      Referer: "https://truyenqqto.com"
+      User-Agent: "Mozilla/5.0"
+

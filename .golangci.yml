@@ -60,7 +60,7 @@ linters-settings:
 
   # goimports: enforce import grouping order
   goimports:
-    local-prefixes: github.com/manga-chef/manga-chef
+    local-prefixes: github.com/ducminhgd/manga-chef
 
   # cyclop: max cyclomatic complexity per function
   cyclop:
@@ -95,7 +95,7 @@ linters-settings:
   wrapcheck:
     ignorePackageGlobs:
       - encoding/*
-      - github.com/manga-chef/manga-chef/*   # internal errors don't need re-wrapping
+      - github.com/ducminhgd/manga-chef/*   # internal errors don't need re-wrapping
 
   # exhaustive: require default case in switches over custom types
   exhaustive:

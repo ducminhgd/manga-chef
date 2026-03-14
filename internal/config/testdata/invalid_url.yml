@@ -1,0 +1,13 @@
+sources:
+  - name: "Bad Scheme"
+    code: "bad_scheme"
+    base_url: "ftp://example.com"
+    scraper: "some_scraper"
+    rate_limit_ms: 300
+
+  - name: "No Scheme"
+    code: "no_scheme"
+    base_url: "not-a-url-at-all"
+    scraper: "some_scraper"
+    rate_limit_ms: 300
+

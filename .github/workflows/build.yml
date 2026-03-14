@@ -114,9 +114,9 @@ jobs:
           go build \
             -trimpath \
             -ldflags="-s -w \
-              -X github.com/manga-chef/manga-chef/internal/version.Version=${{ steps.version.outputs.version }} \
-              -X github.com/manga-chef/manga-chef/internal/version.Commit=${{ steps.version.outputs.commit }} \
-              -X github.com/manga-chef/manga-chef/internal/version.BuildDate=${{ steps.version.outputs.date }}" \
+              -X github.com/ducminhgd/manga-chef/internal/version.Version=${{ steps.version.outputs.version }} \
+              -X github.com/ducminhgd/manga-chef/internal/version.Commit=${{ steps.version.outputs.commit }} \
+              -X github.com/ducminhgd/manga-chef/internal/version.BuildDate=${{ steps.version.outputs.date }}" \
             -o "dist/${BINARY}" \
             ./cmd/manga-chef
 
