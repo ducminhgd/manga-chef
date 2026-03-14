@@ -28,7 +28,7 @@ import (
 	"path/filepath"
 	"sort"
 
-	"gopkg.in/yaml.v3"
+	yaml "gopkg.in/yaml.v3"
 
 	"github.com/ducminhgd/manga-chef/pkg/sources"
 )
