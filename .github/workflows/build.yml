@@ -1,19 +1,5 @@
 name: Build
 
-# Triggers:
-#   - Every push to main (verify the binary compiles on all platforms after merge)
-#   - Every pull request to main (catch compile errors before merge)
-#   - On version tags (vX.Y.Z) — uploads compiled binaries as release assets
-#
-# This workflow is intentionally separate from ci.yml:
-#   - CI (ci.yml) is about code quality: fast, single-OS, blocks PRs
-#   - Build (build.yml) is about artifact correctness: multi-OS, may be slower
-#
-# The matrix covers:
-#   OS      : linux, macOS, windows
-#   Arch    : amd64, arm64
-#   Total   : 6 combinations
-
 on:
   push:
     branches:
@@ -39,14 +25,11 @@ env:
   BINARY_NAME: manga-chef
 
 jobs:
-  # ── Build Matrix ─────────────────────────────────────────────────────────────
   build:
     name: Build / ${{ matrix.goos }}-${{ matrix.goarch }}
     runs-on: ${{ matrix.runner }}
 
     strategy:
-      # Don't cancel all matrix jobs if one fails — we want to see which
-      # platform(s) broke, not just that "something" broke.
       fail-fast: false
       matrix:
         include:
@@ -55,22 +38,26 @@ jobs:
             goarch: amd64
             runner: ubuntu-latest
             asset_suffix: linux-amd64
+            native: true    # ubuntu-latest is x86_64 — can run this binary
 
           - goos: linux
             goarch: arm64
-            runner: ubuntu-latest       # Cross-compile; no native arm64 runner needed
+            runner: ubuntu-latest
             asset_suffix: linux-arm64
+            native: false   # cross-compiled on amd64 runner — cannot execute
 
           # ── macOS ──────────────────────────────────────────────────────────
           - goos: darwin
             goarch: amd64
             runner: macos-latest
             asset_suffix: darwin-amd64
+            native: false   # macos-latest runners are Apple Silicon (arm64)
 
           - goos: darwin
             goarch: arm64
-            runner: macos-latest        # macOS runners support cross-compile to arm64
+            runner: macos-latest
             asset_suffix: darwin-arm64
+            native: true    # macos-latest runners are Apple Silicon (arm64)
 
           # ── Windows ────────────────────────────────────────────────────────
           - goos: windows
@@ -78,19 +65,29 @@ jobs:
             runner: windows-latest
             asset_suffix: windows-amd64
             binary_ext: ".exe"
+            native: false   # skipped separately via goos check — shell differences
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
         with:
-          # Fetch full history so `git describe` produces correct version tags.
           fetch-depth: 0
 
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
           go-version: ${{ env.GO_VERSION }}
+          # cache: true requires go.sum to exist. setup-go caches the module
+          # download cache; combined with the explicit download step below this
+          # means subsequent runs skip the network entirely.
           cache: true
+
+      - name: Download dependencies
+        # Explicit download step ensures modules are cached by setup-go before
+        # go build runs. Without this, go build hits proxy.golang.org at build
+        # time which can fail on slow/restricted networks.
+        # Also ensures go.sum is used to verify integrity before building.
+        run: go mod download
 
       - name: Resolve version info
         id: version
@@ -106,11 +103,12 @@ jobs:
       - name: Build binary
         shell: bash
         env:
-          GOOS:   ${{ matrix.goos }}
-          GOARCH: ${{ matrix.goarch }}
-          CGO_ENABLED: "0"    # Produce a statically linked binary; no libc dependency
+          GOOS:        ${{ matrix.goos }}
+          GOARCH:      ${{ matrix.goarch }}
+          CGO_ENABLED: "0"
         run: |
           BINARY="${{ env.BINARY_NAME }}-${{ matrix.asset_suffix }}${{ matrix.binary_ext }}"
+          mkdir -p dist
           go build \
             -trimpath \
             -ldflags="-s -w \
@@ -119,14 +117,16 @@ jobs:
               -X github.com/ducminhgd/manga-chef/internal/version.BuildDate=${{ steps.version.outputs.date }}" \
             -o "dist/${BINARY}" \
             ./cmd/manga-chef
-
           echo "Built: dist/${BINARY}"
           ls -lh dist/
 
-      - name: Smoke test binary (Unix only)
-        # Quick sanity check: the binary must start without error and print version info.
-        # Windows runners can run the exe too, but shell differences make this easier to skip.
-        if: matrix.goos != 'windows'
+      - name: Smoke test binary
+        # Only run on natively-executable targets.
+        # Cross-compiled binaries (e.g. linux/arm64 built on amd64, darwin/amd64
+        # built on Apple Silicon) will fail with "Exec format error" if run here.
+        # Windows is excluded via the goos check — shell quoting differences make
+        # the .exe smoke test unreliable across runners.
+        if: matrix.native && matrix.goos != 'windows'
         run: |
           ./dist/${{ env.BINARY_NAME }}-${{ matrix.asset_suffix }} --version
           ./dist/${{ env.BINARY_NAME }}-${{ matrix.asset_suffix }} --help
@@ -139,16 +139,13 @@ jobs:
           retention-days: 7
 
   # ── Release ──────────────────────────────────────────────────────────────────
-  # Only runs on version tags (v1.2.3).
-  # Downloads all platform binaries built above and attaches them to the
-  # GitHub Release created by the tag.
   release:
     name: Release
     runs-on: ubuntu-latest
     needs: build
     if: startsWith(github.ref, 'refs/tags/v')
     permissions:
-      contents: write   # Required to create/edit GitHub Releases
+      contents: write
 
     steps:
       - name: Checkout code
@@ -160,13 +157,10 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           path: dist/
-          # Download artifacts from all matrix jobs into dist/<artifact-name>/
           pattern: ${{ env.BINARY_NAME }}-*
           merge-multiple: false
 
       - name: Flatten dist directory
-        # download-artifact puts each artifact in its own subdirectory.
-        # Move all binaries to the root dist/ for release upload.
         run: |
           find dist/ -type f -exec mv {} dist/ \;
           find dist/ -type d -empty -delete
@@ -181,7 +175,6 @@ jobs:
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          # Auto-generate release notes from merged PRs and commits since last tag.
           generate_release_notes: true
           files: |
             dist/*

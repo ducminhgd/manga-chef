@@ -60,7 +60,7 @@ jobs:
           cache: true
 
       - name: Check gofmt
-        run: ./scripts/check-fmt.sh
+        run: bash scripts/check-fmt.sh
 
   # ── Job 2: Lint ──────────────────────────────────────────────────────────────
   # Runs golangci-lint with the project's .golangci.yml config.
