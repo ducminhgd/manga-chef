@@ -1,0 +1,187 @@
+name: Build
+
+# Triggers:
+#   - Every push to main (verify the binary compiles on all platforms after merge)
+#   - Every pull request to main (catch compile errors before merge)
+#   - On version tags (vX.Y.Z) — uploads compiled binaries as release assets
+#
+# This workflow is intentionally separate from ci.yml:
+#   - CI (ci.yml) is about code quality: fast, single-OS, blocks PRs
+#   - Build (build.yml) is about artifact correctness: multi-OS, may be slower
+#
+# The matrix covers:
+#   OS      : linux, macOS, windows
+#   Arch    : amd64, arm64
+#   Total   : 6 combinations
+
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - "v*.*.*"
+    paths-ignore:
+      - "**.md"
+      - "docs/**"
+  pull_request:
+    branches:
+      - main
+    paths-ignore:
+      - "**.md"
+      - "docs/**"
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  GO_VERSION: "1.22"
+  BINARY_NAME: manga-chef
+
+jobs:
+  # ── Build Matrix ─────────────────────────────────────────────────────────────
+  build:
+    name: Build / ${{ matrix.goos }}-${{ matrix.goarch }}
+    runs-on: ${{ matrix.runner }}
+
+    strategy:
+      # Don't cancel all matrix jobs if one fails — we want to see which
+      # platform(s) broke, not just that "something" broke.
+      fail-fast: false
+      matrix:
+        include:
+          # ── Linux ──────────────────────────────────────────────────────────
+          - goos: linux
+            goarch: amd64
+            runner: ubuntu-latest
+            asset_suffix: linux-amd64
+
+          - goos: linux
+            goarch: arm64
+            runner: ubuntu-latest       # Cross-compile; no native arm64 runner needed
+            asset_suffix: linux-arm64
+
+          # ── macOS ──────────────────────────────────────────────────────────
+          - goos: darwin
+            goarch: amd64
+            runner: macos-latest
+            asset_suffix: darwin-amd64
+
+          - goos: darwin
+            goarch: arm64
+            runner: macos-latest        # macOS runners support cross-compile to arm64
+            asset_suffix: darwin-arm64
+
+          # ── Windows ────────────────────────────────────────────────────────
+          - goos: windows
+            goarch: amd64
+            runner: windows-latest
+            asset_suffix: windows-amd64
+            binary_ext: ".exe"
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          # Fetch full history so `git describe` produces correct version tags.
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+
+      - name: Resolve version info
+        id: version
+        shell: bash
+        run: |
+          VERSION=$(git describe --tags --always --dirty 2>/dev/null || echo "dev")
+          COMMIT=$(git rev-parse --short HEAD 2>/dev/null || echo "unknown")
+          BUILD_DATE=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+          echo "version=${VERSION}" >> $GITHUB_OUTPUT
+          echo "commit=${COMMIT}"   >> $GITHUB_OUTPUT
+          echo "date=${BUILD_DATE}" >> $GITHUB_OUTPUT
+
+      - name: Build binary
+        shell: bash
+        env:
+          GOOS:   ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: "0"    # Produce a statically linked binary; no libc dependency
+        run: |
+          BINARY="${{ env.BINARY_NAME }}-${{ matrix.asset_suffix }}${{ matrix.binary_ext }}"
+          go build \
+            -trimpath \
+            -ldflags="-s -w \
+              -X github.com/manga-chef/manga-chef/internal/version.Version=${{ steps.version.outputs.version }} \
+              -X github.com/manga-chef/manga-chef/internal/version.Commit=${{ steps.version.outputs.commit }} \
+              -X github.com/manga-chef/manga-chef/internal/version.BuildDate=${{ steps.version.outputs.date }}" \
+            -o "dist/${BINARY}" \
+            ./cmd/manga-chef
+
+          echo "Built: dist/${BINARY}"
+          ls -lh dist/
+
+      - name: Smoke test binary (Unix only)
+        # Quick sanity check: the binary must start without error and print version info.
+        # Windows runners can run the exe too, but shell differences make this easier to skip.
+        if: matrix.goos != 'windows'
+        run: |
+          ./dist/${{ env.BINARY_NAME }}-${{ matrix.asset_suffix }} --version
+          ./dist/${{ env.BINARY_NAME }}-${{ matrix.asset_suffix }} --help
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.BINARY_NAME }}-${{ matrix.asset_suffix }}
+          path: dist/
+          retention-days: 7
+
+  # ── Release ──────────────────────────────────────────────────────────────────
+  # Only runs on version tags (v1.2.3).
+  # Downloads all platform binaries built above and attaches them to the
+  # GitHub Release created by the tag.
+  release:
+    name: Release
+    runs-on: ubuntu-latest
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    permissions:
+      contents: write   # Required to create/edit GitHub Releases
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Download all platform artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist/
+          # Download artifacts from all matrix jobs into dist/<artifact-name>/
+          pattern: ${{ env.BINARY_NAME }}-*
+          merge-multiple: false
+
+      - name: Flatten dist directory
+        # download-artifact puts each artifact in its own subdirectory.
+        # Move all binaries to the root dist/ for release upload.
+        run: |
+          find dist/ -type f -exec mv {} dist/ \;
+          find dist/ -type d -empty -delete
+          ls -lh dist/
+
+      - name: Generate checksums
+        run: |
+          cd dist
+          sha256sum * > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          # Auto-generate release notes from merged PRs and commits since last tag.
+          generate_release_notes: true
+          files: |
+            dist/*

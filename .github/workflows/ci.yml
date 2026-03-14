@@ -1,0 +1,144 @@
+name: CI
+
+# Triggers:
+#   - Every push to main (post-merge gate)
+#   - Every pull request targeting main (pre-merge gate)
+#
+# Jobs (run in parallel where possible):
+#   fmt    → gofmt check (fast fail — no point linting unformatted code)
+#   lint   → golangci-lint (needs: fmt)
+#   test   → go test -race + coverage report (needs: fmt)
+#
+# The lint and test jobs run in parallel after fmt passes.
+# A branch protection rule should require all three jobs to pass before merge.
+
+on:
+  push:
+    branches:
+      - main
+    # Don't trigger CI on doc-only changes (saves runner minutes).
+    paths-ignore:
+      - "**.md"
+      - "docs/**"
+      - "sources/README.md"
+      - ".github/ISSUE_TEMPLATE/**"
+      - ".github/PULL_REQUEST_TEMPLATE.md"
+  pull_request:
+    branches:
+      - main
+    paths-ignore:
+      - "**.md"
+      - "docs/**"
+      - "sources/README.md"
+      - ".github/ISSUE_TEMPLATE/**"
+      - ".github/PULL_REQUEST_TEMPLATE.md"
+
+# Cancel in-flight runs for the same branch when a new push arrives.
+# This avoids wasting runner minutes on outdated commits during active development.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  GO_VERSION: "1.22"
+  GOLANGCI_LINT_VERSION: "v1.57.2"
+
+jobs:
+  # ── Job 1: Format Check ──────────────────────────────────────────────────────
+  # Fast fail: runs in ~5s. If code isn't formatted, skip lint and test entirely.
+  fmt:
+    name: Format Check
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+
+      - name: Check gofmt
+        run: ./scripts/check-fmt.sh
+
+  # ── Job 2: Lint ──────────────────────────────────────────────────────────────
+  # Runs golangci-lint with the project's .golangci.yml config.
+  # Uses the official golangci-lint action for correct caching behaviour.
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    needs: fmt
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+
+      - name: Run golangci-lint
+        uses: golangci/golangci-lint-action@v6
+        with:
+          version: ${{ env.GOLANGCI_LINT_VERSION }}
+          # Pass the config file explicitly so the action doesn't search for one.
+          args: --config=.golangci.yml --timeout=5m
+
+  # ── Job 3: Test ──────────────────────────────────────────────────────────────
+  # Runs the full unit test suite with the race detector.
+  # Generates a coverage report and posts it to the job summary.
+  test:
+    name: Test (race detector)
+    runs-on: ubuntu-latest
+    needs: fmt
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+
+      - name: Download dependencies
+        run: go mod download
+
+      - name: Verify go.sum is up to date
+        # Catches cases where go.mod was edited but go.sum wasn't regenerated.
+        run: go mod verify
+
+      - name: Run tests with race detector
+        run: |
+          go test \
+            -race \
+            -count=1 \
+            -timeout=120s \
+            -coverprofile=coverage.out \
+            -covermode=atomic \
+            ./...
+
+      - name: Generate coverage report (text summary)
+        # Writes a per-package coverage table to stdout.
+        run: go tool cover -func=coverage.out
+
+      - name: Post coverage summary to job summary
+        # Makes the coverage percentage visible directly in the GitHub Actions UI
+        # without having to click into the logs.
+        run: |
+          echo "## 📊 Test Coverage" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          go tool cover -func=coverage.out >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+
+      - name: Upload coverage artifact
+        # Retained for 7 days. Allows downloading the raw coverage.out file
+        # for local HTML report generation: go tool cover -html=coverage.out
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: coverage.out
+          retention-days: 7

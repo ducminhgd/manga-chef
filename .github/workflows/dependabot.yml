@@ -1,0 +1,63 @@
+# .github/dependabot.yml
+#
+# Keeps two dependency ecosystems automatically up to date:
+#
+#   1. GitHub Actions — pins are version tags (actions/checkout@v4).
+#      Dependabot opens PRs to bump these when new versions are released.
+#      This matters for security: Actions can be supply-chain attack vectors.
+#
+#   2. Go modules — opens PRs to bump go.mod / go.sum when new versions of
+#      direct dependencies are published.
+#
+# Both run weekly on Monday at 09:00 UTC to batch updates rather than creating
+# a new PR every day.
+#
+# PRs are auto-labelled for easy triage in the GitHub Issues / PR board.
+
+version: 2
+
+updates:
+  # ── GitHub Actions ───────────────────────────────────────────────────────────
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "09:00"
+      timezone: Asia/Ho_Chi_Minh
+    labels:
+      - dependencies
+      - github-actions
+    commit-message:
+      prefix: "chore(deps)"
+    # Group all Actions bumps into a single PR per week instead of one PR per action.
+    groups:
+      github-actions-all:
+        patterns:
+          - "*"
+
+  # ── Go Modules ───────────────────────────────────────────────────────────────
+  - package-ecosystem: gomod
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "09:00"
+      timezone: Asia/Ho_Chi_Minh
+    labels:
+      - dependencies
+      - go
+    commit-message:
+      prefix: "chore(deps)"
+    # Group patch and minor updates into a single PR.
+    # Major version bumps always get their own PR (breaking changes need review).
+    groups:
+      go-minor-patch:
+        update-types:
+          - minor
+          - patch
+    # Ignore pre-release versions of all Go dependencies.
+    ignore:
+      - dependency-name: "*"
+        update-types:
+          - version-update:semver-major
