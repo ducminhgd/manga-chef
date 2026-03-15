@@ -10,6 +10,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	_ "github.com/ducminhgd/manga-chef/internal/scraper/generic"
 	_ "github.com/ducminhgd/manga-chef/internal/scraper/truyenqq"
 	"github.com/ducminhgd/manga-chef/internal/version"
 )
