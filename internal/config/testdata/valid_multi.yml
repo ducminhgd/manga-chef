@@ -1,13 +1,13 @@
 sources:
   - name: "TruyenQQ"
     code: "truyenqq"
-    base_url: "https://truyenqqto.com"
+    base_url: "https://truyenqqno.com"
     scraper: "truyenqq"
     rate_limit_ms: 500
     retries: 3
     timeout_s: 30
     headers:
-      Referer: "https://truyenqqto.com"
+      Referer: "https://truyenqqno.com"
 
   - name: "MangaDex"
     code: "mangadex"

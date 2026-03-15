@@ -26,11 +26,11 @@ var _ scraper.HTTPClient = (*scraper.MockHTTPClient)(nil)
 func TestMockScraper_GetChapterList_ReturnsConfiguredValue(t *testing.T) {
 	m := scraper.NewMockScraper(t)
 	ctx := context.Background()
-	mangaURL := "https://truyenqqto.com/truyen-tranh/dau-an-rong-thieng-236"
+	mangaURL := "https://truyenqqno.com/truyen-tranh/dau-an-rong-thieng-236"
 
 	want := []sources.Chapter{
-		{Number: 1, Title: "Chapter 1", URL: "https://truyenqqto.com/.../chap-1.html"},
-		{Number: 2, Title: "Chapter 2", URL: "https://truyenqqto.com/.../chap-2.html"},
+		{Number: 1, Title: "Chapter 1", URL: "https://truyenqqno.com/.../chap-1.html"},
+		{Number: 2, Title: "Chapter 2", URL: "https://truyenqqno.com/.../chap-2.html"},
 	}
 
 	m.EXPECT().GetChapterList(ctx, mangaURL).Return(want, nil)
@@ -55,12 +55,12 @@ func TestMockScraper_GetChapterList_ReturnsError(t *testing.T) {
 func TestMockScraper_GetImageURLs_ReturnsConfiguredValue(t *testing.T) {
 	m := scraper.NewMockScraper(t)
 	ctx := context.Background()
-	chapterURL := "https://truyenqqto.com/truyen-tranh/dau-an-rong-thieng-236-chap-1.html"
+	chapterURL := "https://truyenqqno.com/truyen-tranh/dau-an-rong-thieng-236-chap-1.html"
 
 	want := []string{
-		"https://cdn.truyenqqto.com/chap1/page001.jpg",
-		"https://cdn.truyenqqto.com/chap1/page002.jpg",
-		"https://cdn.truyenqqto.com/chap1/page003.jpg",
+		"https://cdn.truyenqqno.com/chap1/page001.jpg",
+		"https://cdn.truyenqqno.com/chap1/page002.jpg",
+		"https://cdn.truyenqqno.com/chap1/page003.jpg",
 	}
 
 	m.EXPECT().GetImageURLs(ctx, chapterURL).Return(want, nil)

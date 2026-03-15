@@ -14,11 +14,11 @@ sources:
   # ---------------------------------------------------------------------------
   - name: "TruyenQQ"          # Human-readable display name shown in CLI output
     code: "truyenqq"          # Short unique identifier used with --source flag
-    base_url: "https://truyenqqto.com"   # Root URL; change this to switch mirrors
+    base_url: "https://truyenqqno.com"   # Root URL; change this to switch mirrors
     scraper: "truyenqq"       # Maps to the built-in TruyenQQ scraper
     enabled: true             # Optional. Default: true. Set to false to hide from list
     headers:                  # Optional. Extra HTTP headers sent with every request
-      Referer: "https://truyenqqto.com"  # Required by TruyenQQ CDN to avoid 403
+      Referer: "https://truyenqqno.com"  # Required by TruyenQQ CDN to avoid 403
       User-Agent: "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36"
     rate_limit_ms: 500        # Optional. Milliseconds between sequential requests
     retries: 5                # Optional. Max retry attempts per image. Default: 3

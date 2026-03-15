@@ -1,7 +1,7 @@
 # Manga Chef — Engineering Project Plan
 
 **Language:** Go (primary)  
-**First target source:** TruyenQQ (`truyenqqto.com`)  
+**First target source:** TruyenQQ (`truyenqqno.com`)  
 **First sample manga:** Dấu Ấn Rồng Thiêng - Dragon Quest (349 chapters)  
 **Delivery target:** MVP — fully working end-to-end download + PDF/EPUB conversion for TruyenQQ  
 
@@ -153,8 +153,8 @@
 - **Dependencies:** Epic 3.1
 
 **TruyenQQ URL patterns (verified):**
-- Manga main page: `https://truyenqqto.com/truyen-tranh/dau-an-rong-thieng-236`
-- Chapter page: `https://truyenqqto.com/truyen-tranh/dau-an-rong-thieng-236-chap-1.html`
+- Manga main page: `https://truyenqqno.com/truyen-tranh/dau-an-rong-thieng-236`
+- Chapter page: `https://truyenqqno.com/truyen-tranh/dau-an-rong-thieng-236-chap-1.html`
 
 | #    | Task                                                                              | Estimate | Role | Notes                                                                                |
 | ---- | --------------------------------------------------------------------------------- | -------- | ---- | ------------------------------------------------------------------------------------ |
@@ -360,7 +360,7 @@
 
 ### 🔷 Epic 7.1 — MVP Acceptance Run
 
-> Run the full download + convert pipeline for Dấu Ấn Rồng Thiêng ch.1–5 against truyenqqto.com.
+> Run the full download + convert pipeline for Dấu Ấn Rồng Thiêng ch.1–5 against truyenqqno.com.
 
 - **Priority:** P0
 - **Estimate:** M
@@ -368,7 +368,7 @@
 
 | #    | Task                                                                                               | Estimate | Role | Notes                                                                          |
 | ---- | -------------------------------------------------------------------------------------------------- | -------- | ---- | ------------------------------------------------------------------------------ |
-| T-71 | Prepare `sources/truyenqq.yml` pointing to `truyenqqto.com`                                        | XS       | BE   | Validated against live site                                                    |
+| T-71 | Prepare `sources/truyenqq.yml` pointing to `truyenqqno.com`                                        | XS       | BE   | Validated against live site                                                    |
 | T-72 | Manual run: `manga-chef download --source truyenqq --url <manga-url> --chapters 1-5 --convert pdf` | S        | BE   | Verify: 5 chapter folders created, 5 PDFs generated, correct page order        |
 | T-73 | Verify PDF opens correctly in a PDF viewer                                                         | XS       | QA   | Check first and last page of ch.1; confirm no corrupt images                   |
 | T-74 | Document the end-to-end command in `README.md` with TruyenQQ example                               | S        | Docs | Include: install, config, download, convert — working example using this manga |
@@ -438,7 +438,7 @@ Epic 6.1 (CLI)                  ← wires all above
 
 **Assumptions:**
 - TruyenQQ image CDN URLs are direct HTTP links (not JavaScript-rendered or token-protected)
-- Dấu Ấn Rồng Thiêng (349 chapters) is fully available on `truyenqqto.com`
+- Dấu Ấn Rồng Thiêng (349 chapters) is fully available on `truyenqqno.com`
 - No Cloudflare challenge page protection on TruyenQQ (standard Go `http.Client` is sufficient)
 - Developer has Go 1.22+ installed locally
 

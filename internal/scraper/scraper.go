@@ -45,7 +45,7 @@ type ScraperInterface interface {
 	// GetChapterList fetches the full list of chapters from a manga's main page.
 	//
 	// mangaURL is the absolute URL of the manga's index page on the source site
-	// (e.g. "https://truyenqqto.com/truyen-tranh/dau-an-rong-thieng-236").
+	// (e.g. "https://truyenqqno.com/truyen-tranh/dau-an-rong-thieng-236").
 	//
 	// Returns chapters sorted in ascending order by chapter number (chapter 1
 	// first). Implementations that receive a descending list must reverse it.
@@ -57,7 +57,7 @@ type ScraperInterface interface {
 	// GetImageURLs fetches the ordered list of image URLs for a single chapter.
 	//
 	// chapterURL is the absolute URL of the chapter reader page
-	// (e.g. "https://truyenqqto.com/truyen-tranh/dau-an-rong-thieng-236-chap-1.html").
+	// (e.g. "https://truyenqqno.com/truyen-tranh/dau-an-rong-thieng-236-chap-1.html").
 	//
 	// Returns URLs in ascending page order (page 1 first).
 	// Returns an empty slice (not an error) when the chapter has no images.

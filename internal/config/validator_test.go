@@ -14,7 +14,7 @@ func validSource() sources.SourceConfig {
 	return sources.SourceConfig{
 		Name:        "TruyenQQ",
 		Code:        "truyenqq",
-		BaseURL:     "https://truyenqqto.com",
+		BaseURL:     "https://truyenqqno.com",
 		Scraper:     "truyenqq",
 		RateLimitMs: 500,
 	}

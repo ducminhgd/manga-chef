@@ -56,7 +56,7 @@ func itoa(n int) string {
 func TestSourcesList_ShowsAllEnabledSources(t *testing.T) {
 	dir := t.TempDir()
 	writeSource(t, filepath.Join(dir, "truyenqq.yml"),
-		"TruyenQQ", "truyenqq", "https://truyenqqto.com", "truyenqq", 500)
+		"TruyenQQ", "truyenqq", "https://truyenqqno.com", "truyenqq", 500)
 	writeSource(t, filepath.Join(dir, "mangadex.yml"),
 		"MangaDex", "mangadex", "https://api.mangadex.org", "mangadex", 0)
 
@@ -67,7 +67,7 @@ func TestSourcesList_ShowsAllEnabledSources(t *testing.T) {
 
 	assertContains(t, out, "truyenqq")
 	assertContains(t, out, "TruyenQQ")
-	assertContains(t, out, "https://truyenqqto.com")
+	assertContains(t, out, "https://truyenqqno.com")
 	assertContains(t, out, "mangadex")
 }
 
@@ -134,7 +134,7 @@ func TestSourcesList_EmptyDirectory(t *testing.T) {
 func TestSourcesList_TableHasExpectedColumns(t *testing.T) {
 	dir := t.TempDir()
 	writeSource(t, filepath.Join(dir, "s.yml"),
-		"TruyenQQ", "truyenqq", "https://truyenqqto.com", "truyenqq", 500)
+		"TruyenQQ", "truyenqq", "https://truyenqqno.com", "truyenqq", 500)
 
 	out, err := runSources(t, dir, "list")
 	if err != nil {
@@ -171,7 +171,7 @@ func TestSourcesAdd_AddsNewSource(t *testing.T) {
 	destDir := t.TempDir()
 	srcDir := t.TempDir()
 	newFile := filepath.Join(srcDir, "truyenqq.yml")
-	writeSource(t, newFile, "TruyenQQ", "truyenqq", "https://truyenqqto.com", "truyenqq", 500)
+	writeSource(t, newFile, "TruyenQQ", "truyenqq", "https://truyenqqno.com", "truyenqq", 500)
 
 	out, err := runSources(t, destDir, "add", newFile)
 	if err != nil {
@@ -193,7 +193,7 @@ func TestSourcesAdd_DuplicateCode_Errors(t *testing.T) {
 
 	// Put an existing source in destDir.
 	writeSource(t, filepath.Join(destDir, "existing.yml"),
-		"TruyenQQ", "truyenqq", "https://truyenqqto.com", "truyenqq", 500)
+		"TruyenQQ", "truyenqq", "https://truyenqqno.com", "truyenqq", 500)
 
 	// Try to add another file with the same code.
 	newFile := filepath.Join(srcDir, "duplicate.yml")
@@ -212,7 +212,7 @@ func TestSourcesAdd_DryRun_DoesNotWriteFile(t *testing.T) {
 	destDir := t.TempDir()
 	srcDir := t.TempDir()
 	newFile := filepath.Join(srcDir, "truyenqq.yml")
-	writeSource(t, newFile, "TruyenQQ", "truyenqq", "https://truyenqqto.com", "truyenqq", 500)
+	writeSource(t, newFile, "TruyenQQ", "truyenqq", "https://truyenqqno.com", "truyenqq", 500)
 
 	out, err := runSources(t, destDir, "add", newFile, "--dry-run")
 	if err != nil {
@@ -274,7 +274,7 @@ func TestSourcesAdd_CreatesDestDirIfMissing(t *testing.T) {
 	destDir := filepath.Join(parent, "new-sources-dir") // does not exist yet
 	srcDir := t.TempDir()
 	newFile := filepath.Join(srcDir, "truyenqq.yml")
-	writeSource(t, newFile, "TruyenQQ", "truyenqq", "https://truyenqqto.com", "truyenqq", 500)
+	writeSource(t, newFile, "TruyenQQ", "truyenqq", "https://truyenqqno.com", "truyenqq", 500)
 
 	_, err := runSources(t, destDir, "add", newFile)
 	if err != nil {

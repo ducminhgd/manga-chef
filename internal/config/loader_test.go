@@ -30,14 +30,14 @@ func TestLoadFile_ValidSingle(t *testing.T) {
 	got := cfgs[0]
 	assertEqual(t, "Name", "TruyenQQ", got.Name)
 	assertEqual(t, "Code", "truyenqq", got.Code)
-	assertEqual(t, "BaseURL", "https://truyenqqto.com", got.BaseURL)
+	assertEqual(t, "BaseURL", "https://truyenqqno.com", got.BaseURL)
 	assertEqual(t, "Scraper", "truyenqq", got.Scraper)
 	assertEqual(t, "RateLimitMs", 500, got.RateLimitMs)
 	assertEqual(t, "Retries", 3, got.Retries)
 	assertEqual(t, "TimeoutS", 30, got.TimeoutS)
 
-	if got.Headers["Referer"] != "https://truyenqqto.com" {
-		t.Errorf("Headers[Referer]: expected %q, got %q", "https://truyenqqto.com", got.Headers["Referer"])
+	if got.Headers["Referer"] != "https://truyenqqno.com" {
+		t.Errorf("Headers[Referer]: expected %q, got %q", "https://truyenqqno.com", got.Headers["Referer"])
 	}
 }
 
@@ -232,7 +232,7 @@ func TestLoadDir_NotFound(t *testing.T) {
 
 func TestLoad_DispatchesToLoadFile(t *testing.T) {
 	f := filepath.Join(t.TempDir(), "sources.yml")
-	writeFile(t, f, sourceYAML("TruyenQQ", "truyenqq", "https://truyenqqto.com", "truyenqq", 500))
+	writeFile(t, f, sourceYAML("TruyenQQ", "truyenqq", "https://truyenqqno.com", "truyenqq", 500))
 
 	cfgs, err := config.Load(f)
 	if err != nil {
@@ -248,7 +248,7 @@ func TestLoad_DispatchesToLoadFile(t *testing.T) {
 
 func TestLoad_DispatchesToLoadDir(t *testing.T) {
 	dir := t.TempDir()
-	writeFile(t, filepath.Join(dir, "sources.yml"), sourceYAML("TruyenQQ", "truyenqq", "https://truyenqqto.com", "truyenqq", 500))
+	writeFile(t, filepath.Join(dir, "sources.yml"), sourceYAML("TruyenQQ", "truyenqq", "https://truyenqqno.com", "truyenqq", 500))
 
 	cfgs, err := config.Load(dir)
 	if err != nil {

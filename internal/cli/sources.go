@@ -36,7 +36,7 @@ Source files follow this format:
   sources:
     - name: "TruyenQQ"
       code: "truyenqq"
-      base_url: "https://truyenqqto.com"
+      base_url: "https://truyenqqno.com"
       scraper: "truyenqq"
       rate_limit_ms: 500`,
 	}
