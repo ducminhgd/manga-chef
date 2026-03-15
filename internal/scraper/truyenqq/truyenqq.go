@@ -11,6 +11,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"golang.org/x/net/html"
 
@@ -149,33 +150,52 @@ func (s *Scraper) GetImageURLs(ctx context.Context, chapterURL string) ([]string
 }
 
 func (s *Scraper) fetchHTML(ctx context.Context, targetURL string) (*html.Node, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, targetURL, nil)
-	if err != nil {
-		return nil, fmt.Errorf("request new: %w", err)
-	}
+	backoffMs := int64(500)
+	for attempt := 0; attempt < 4; attempt++ {
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, targetURL, nil)
+		if err != nil {
+			return nil, fmt.Errorf("request new: %w", err)
+		}
 
-	for name, value := range s.cfg.Headers {
-		req.Header.Set(name, value)
-	}
-	if req.Header.Get("User-Agent") == "" {
-		req.Header.Set("User-Agent", userAgentFallback)
-	}
+		for name, value := range s.cfg.Headers {
+			req.Header.Set(name, value)
+		}
+		if req.Header.Get("User-Agent") == "" {
+			req.Header.Set("User-Agent", userAgentFallback)
+		}
 
-	resp, err := s.client.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("http GET %s: %w", targetURL, err)
-	}
-	defer resp.Body.Close()
+		resp, err := s.client.Do(req)
+		if err != nil {
+			return nil, fmt.Errorf("http GET %s: %w", targetURL, err)
+		}
+		defer resp.Body.Close()
 
-	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
-		return nil, fmt.Errorf("http GET %s: status %d, body: %s", targetURL, resp.StatusCode, strings.TrimSpace(string(body)))
+		if resp.StatusCode == http.StatusTooManyRequests {
+			if attempt == 3 {
+				body, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
+				return nil, fmt.Errorf("http GET %s: status %d, body: %s", targetURL, resp.StatusCode, strings.TrimSpace(string(body)))
+			}
+			select {
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			case <-time.After(time.Duration(backoffMs) * time.Millisecond):
+			}
+			backoffMs *= 2
+			continue
+		}
+
+		if resp.StatusCode != http.StatusOK {
+			body, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
+			return nil, fmt.Errorf("http GET %s: status %d, body: %s", targetURL, resp.StatusCode, strings.TrimSpace(string(body)))
+		}
+
+		doc, err := html.Parse(resp.Body)
+		if err != nil {
+			return nil, fmt.Errorf("parsing html: %w", err)
+		}
+		return doc, nil
 	}
-	doc, err := html.Parse(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("parsing html: %w", err)
-	}
-	return doc, nil
+	return nil, fmt.Errorf("http GET %s: retry attempts exhausted", targetURL)
 }
 
 func (s *Scraper) collectChapterAnchors(doc *html.Node, baseURL string) []*html.Node {
@@ -232,17 +252,42 @@ func collectAnchors(root *html.Node) []*html.Node {
 }
 
 func collectImageNodes(doc *html.Node) []*html.Node {
-	return collectImages(doc)
-}
-
-func collectImages(root *html.Node) []*html.Node {
 	var out []*html.Node
-	var walk func(*html.Node)
-	walk = func(n *html.Node) {
+	var walkContainer func(*html.Node)
+	walkContainer = func(n *html.Node) {
 		if n.Type == html.ElementNode && n.Data == "img" {
 			if getAttr(n, "data-original") != "" || getAttr(n, "data-src") != "" || getAttr(n, "data-cdn") != "" || getAttr(n, "src") != "" {
 				out = append(out, n)
 			}
+		}
+		for c := n.FirstChild; c != nil; c = c.NextSibling {
+			walkContainer(c)
+		}
+	}
+
+	pageContainers := findNodes(doc, func(n *html.Node) bool {
+		if n.Type != html.ElementNode || n.Data != "div" {
+			return false
+		}
+		cls := getAttr(n, "class")
+		return strings.Contains(cls, "page-chapter")
+	})
+
+	for _, c := range pageContainers {
+		walkContainer(c)
+	}
+	return out
+}
+
+func findNodes(root *html.Node, pred func(*html.Node) bool) []*html.Node {
+	var out []*html.Node
+	var walk func(*html.Node)
+	walk = func(n *html.Node) {
+		if n == nil {
+			return
+		}
+		if pred(n) {
+			out = append(out, n)
 		}
 		for c := n.FirstChild; c != nil; c = c.NextSibling {
 			walk(c)

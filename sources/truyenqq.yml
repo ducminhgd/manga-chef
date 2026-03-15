@@ -28,3 +28,10 @@ sources:
     headers:
       Referer: "https://truyenqqno.com"
       User-Agent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+      sec-fetch-site: "cross-site"
+    # Only download images inside `<div class="page-chapter">` containers.
+    selectors:
+      chapter_list: "ul.list-chapter li a"
+      chapter_number: "attr:href"
+      image_list: "div.page-chapter"
+      image_url: "attr:data-original"

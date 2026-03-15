@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"path/filepath"
 
 	"github.com/spf13/cobra"
 
@@ -54,8 +55,8 @@ Download chapters with: manga-chef download --source <code> --url <manga-url>`,
 	root.PersistentFlags().StringVar(
 		&f.outputDir,
 		"output",
-		"./library",
-		"Directory where downloaded chapters and converted files are written",
+		"",
+		"Directory where downloaded chapters and converted files are written. Defaults to manga slug if omitted.",
 	)
 	root.PersistentFlags().StringVar(
 		&f.logLevel,
@@ -66,7 +67,7 @@ Download chapters with: manga-chef download --source <code> --url <manga-url>`,
 
 	// ── Sub-commands ────────────────────────────────────────────────────────
 	root.AddCommand(NewSourcesCmd(func() string { return f.sourcesPath }))
-
+	root.AddCommand(newDownloadCmd(func() string { return f.sourcesPath }, func() string { return f.outputDir }))
 	return root
 }
 
@@ -93,12 +94,24 @@ func defaultSourcesPath() string {
 	configHome := os.Getenv("XDG_CONFIG_HOME")
 	if configHome == "" {
 		home, err := os.UserHomeDir()
-		if err != nil {
-			return "./sources"
+		if err == nil {
+			configHome = home + "/.config"
 		}
-		configHome = home + "/.config"
 	}
-	return configHome + "/manga-chef/sources"
+
+	if configHome != "" {
+		defaultPath := filepath.Join(configHome, "manga-chef", "sources")
+		if _, err := os.Stat(defaultPath); err == nil {
+			return defaultPath
+		}
+	}
+
+	localPath := "./sources"
+	if _, err := os.Stat(localPath); err == nil {
+		return localPath
+	}
+	_ = os.MkdirAll(localPath, 0o755)
+	return localPath
 }
 
 // configureLogger initialises the global slog logger with the requested level.
