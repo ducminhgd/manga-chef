@@ -108,6 +108,60 @@ func TestDownloadChapter_ProgressReporter(t *testing.T) {
 	require.Equal(t, 1, reporter.done)
 }
 
+func TestDownloadChapter_429RetryCyclesAfterThreeAttempts(t *testing.T) {
+	tmp := t.TempDir()
+	callCount := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		callCount++
+		if callCount <= 3 {
+			w.WriteHeader(http.StatusTooManyRequests)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("image"))
+	}))
+	defer srv.Close()
+
+	d, err := New(&fakeScraper{images: map[string][]string{"url": {srv.URL + "/1.jpg"}}}, Options{
+		OutDir:         tmp,
+		RetryInitialMs: 1,
+		MaxWaitSec:     0, // keep test fast; still exercises cycle reset
+		Workers:        1,
+	})
+	require.NoError(t, err)
+
+	err = d.DownloadChapter(context.Background(), "mycode", sources.Chapter{Number: 1, Title: "ch1", URL: "url"})
+	require.NoError(t, err)
+	require.GreaterOrEqual(t, callCount, 4)
+}
+
+func TestDownloadChapter_403RetryCyclesAfterThreeAttempts(t *testing.T) {
+	tmp := t.TempDir()
+	callCount := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		callCount++
+		if callCount <= 3 {
+			w.WriteHeader(http.StatusForbidden)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("image"))
+	}))
+	defer srv.Close()
+
+	d, err := New(&fakeScraper{images: map[string][]string{"url": {srv.URL + "/1.jpg"}}}, Options{
+		OutDir:         tmp,
+		RetryInitialMs: 1,
+		MaxWaitSec:     0, // keep test fast; still exercises cycle reset
+		Workers:        1,
+	})
+	require.NoError(t, err)
+
+	err = d.DownloadChapter(context.Background(), "mycode", sources.Chapter{Number: 1, Title: "ch1", URL: "url"})
+	require.NoError(t, err)
+	require.GreaterOrEqual(t, callCount, 4)
+}
+
 type fakeProgressReporter struct {
 	starts         int
 	progressEvents int

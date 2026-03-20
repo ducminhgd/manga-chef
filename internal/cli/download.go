@@ -24,6 +24,7 @@ func newDownloadCmd(getSourcesPath func() string, getOutputDir func() string) *c
 	var quiet bool
 	var fromChapter float64
 	var toChapter float64
+	var maxWaitSec int
 
 	cmd := &cobra.Command{
 		Use:   "download",
@@ -86,6 +87,7 @@ Example: manga-chef download --source truyenqq --url https://truyenqqno.com/truy
 				RateLimitMs:       srcCfg.RateLimitMs,
 				Retries:           srcCfg.EffectiveRetries(),
 				RequestTimeoutSec: srcCfg.EffectiveTimeoutS(),
+				MaxWaitSec:        maxWaitSec,
 				Headers:           srcCfg.Headers,
 				Reporter:          reporter,
 			})
@@ -108,6 +110,7 @@ Example: manga-chef download --source truyenqq --url https://truyenqqno.com/truy
 	cmd.Flags().IntVar(&workers, "workers", 4, "Number of concurrent image downloader workers")
 	cmd.Flags().BoolVar(&force, "force", false, "Force re-download chapters even if already present")
 	cmd.Flags().BoolVar(&quiet, "quiet", false, "Suppress progress output")
+	cmd.Flags().IntVar(&maxWaitSec, "max-wait", 300, "Wait time in seconds after each failed 3-attempt retry cycle before trying again")
 	return cmd
 }
 

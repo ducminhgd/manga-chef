@@ -38,6 +38,7 @@ type Options struct {
 	RateLimitMs       int
 	Retries           int
 	RetryInitialMs    int
+	MaxWaitSec        int
 	RequestTimeoutSec int
 	ImageTimeoutSec   int
 	Headers           map[string]string
@@ -76,6 +77,9 @@ func New(scraper scraper.ScraperInterface, opts Options) (*Downloader, error) {
 	}
 	if opts.RetryInitialMs <= 0 {
 		opts.RetryInitialMs = 300
+	}
+	if opts.MaxWaitSec < 0 {
+		opts.MaxWaitSec = 300
 	}
 	if err := os.MkdirAll(opts.OutDir, 0o755); err != nil {
 		return nil, fmt.Errorf("create output directory %q: %w", opts.OutDir, err)
@@ -216,36 +220,55 @@ func (d *Downloader) DownloadChapter(ctx context.Context, sourceCode string, cha
 }
 
 func (d *Downloader) downloadImageWithRetry(ctx context.Context, folder string, page int, imageURL string) error {
-	var lastErr error
-	var backoffMs int64 = int64(d.opts.RetryInitialMs)
-	for attempt := 0; attempt <= d.opts.Retries; attempt++ {
-		if attempt > 0 {
+	const attemptsPerCycle = 3
+
+	for {
+		backoffMs := int64(d.opts.RetryInitialMs)
+		hitRetryCycleStatus := false
+		for attempt := 1; attempt <= attemptsPerCycle; attempt++ {
+			if attempt > 1 {
+				select {
+				case <-ctx.Done():
+					return ctx.Err()
+				case <-time.After(time.Duration(backoffMs) * time.Millisecond):
+				}
+				backoffMs *= 2
+			}
+
+			err := d.downloadImage(ctx, folder, page, imageURL)
+			if err == nil {
+				return nil
+			}
+			if isRetryCycleStatus(err) {
+				hitRetryCycleStatus = true
+				continue
+			}
+			if !shouldRetryDownload(err) {
+				return fmt.Errorf("download image %q failed permanently: %w", imageURL, err)
+			}
+			// Retryable non-429 errors are retried within this cycle only.
+			if attempt == attemptsPerCycle {
+				return fmt.Errorf("download image %q failed after %d attempts: %w", imageURL, attemptsPerCycle, err)
+			}
+		}
+
+		// Only 429 should trigger wait + reset loop.
+		if !hitRetryCycleStatus {
+			return fmt.Errorf("download image %q failed after %d attempts", imageURL, attemptsPerCycle)
+		}
+
+		waitFor := time.Duration(d.opts.MaxWaitSec) * time.Second
+		if waitFor > 0 {
 			select {
 			case <-ctx.Done():
 				return ctx.Err()
-			case <-time.After(time.Duration(backoffMs) * time.Millisecond):
+			case <-time.After(waitFor):
 			}
-			backoffMs *= 2
 		}
-
-		err := d.downloadImage(ctx, folder, page, imageURL)
-		if err == nil {
-			return nil
-		}
-		lastErr = err
-
-		if isHTTP429Error(err) {
-			if attempt == 3 {
-				break
-			}
-			continue
-		}
-
-		if !shouldRetryDownload(err) || attempt == d.opts.Retries {
-			break
+		if ctx.Err() != nil {
+			return ctx.Err()
 		}
 	}
-	return fmt.Errorf("download image %q after %d attempts: %w", imageURL, d.opts.Retries+1, lastErr)
 }
 
 func isHTTP429Error(err error) bool {
@@ -256,6 +279,20 @@ func isHTTP429Error(err error) bool {
 		return true
 	}
 	return false
+}
+
+func isHTTP403Error(err error) bool {
+	if err == nil {
+		return false
+	}
+	if strings.Contains(err.Error(), "status 403") || strings.Contains(err.Error(), "403") {
+		return true
+	}
+	return false
+}
+
+func isRetryCycleStatus(err error) bool {
+	return isHTTP429Error(err) || isHTTP403Error(err)
 }
 
 func (d *Downloader) downloadImage(ctx context.Context, folder string, page int, imageURL string) error {
