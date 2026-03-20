@@ -1,7 +1,7 @@
 # Manga Chef — Engineering Project Plan
 
 **Language:** Go (primary)  
-**First target source:** TruyenQQ (`truyenqqno.com`)  
+**First target source:** TruyenQQ (`truyenqqto.com`)  
 **First sample manga:** Dấu Ấn Rồng Thiêng - Dragon Quest (349 chapters)  
 **Delivery target:** MVP — fully working end-to-end download + PDF/EPUB conversion for TruyenQQ  
 
@@ -34,7 +34,7 @@
 
 | #    | Task                                                      | Estimate | Role | Notes                                                                          |
 | ---- | --------------------------------------------------------- | -------- | ---- | ------------------------------------------------------------------------------ |
-| T-01 | Initialize Go module (`github.com/ducminhgd/manga-chef`) | XS       | BE   | `go mod init`; set minimum Go version in `go.mod`                              |
+| T-01 | Initialize Go module (`github.com/manga-chef/manga-chef`) | XS       | BE   | `go mod init`; set minimum Go version in `go.mod`                              |
 | T-02 | Create canonical directory structure                      | XS       | BE   | `cmd/`, `internal/`, `pkg/`, `sources/`, `testdata/`, `scripts/`               |
 | T-03 | Add core dependencies to `go.mod`                         | S        | BE   | `cobra`, `gopkg.in/yaml.v3`, `golang.org/x/net`, `go-epub`, `jung-kurt/gofpdf` |
 | T-04 | Create root `Makefile` with standard targets              | XS       | BE   | `build`, `test`, `test-race`, `lint`, `fmt`, `clean`, `generate`               |
@@ -153,8 +153,8 @@
 - **Dependencies:** Epic 3.1
 
 **TruyenQQ URL patterns (verified):**
-- Manga main page: `https://truyenqqno.com/truyen-tranh/dau-an-rong-thieng-236`
-- Chapter page: `https://truyenqqno.com/truyen-tranh/dau-an-rong-thieng-236-chap-1.html`
+- Manga main page: `https://truyenqqto.com/truyen-tranh/dau-an-rong-thieng-236`
+- Chapter page: `https://truyenqqto.com/truyen-tranh/dau-an-rong-thieng-236-chap-1.html`
 
 | #    | Task                                                                              | Estimate | Role | Notes                                                                                |
 | ---- | --------------------------------------------------------------------------------- | -------- | ---- | ------------------------------------------------------------------------------------ |
@@ -272,7 +272,7 @@
 | T-49 | Define `internal/converter/converter.go` — `ConverterInterface`                          | XS       | BE   | `Convert(ctx, inputDir, outputPath string, opts Options) error`              |
 | T-50 | Implement `internal/converter/pdf/pdf.go` using `gofpdf`                                 | M        | BE   | One image per page; preserve aspect ratio; letter-size page                  |
 | T-51 | Handle JPEG, PNG, WebP input formats                                                     | S        | BE   | Convert WebP to PNG before embedding if `gofpdf` doesn't support it natively |
-| T-52 | Implement `convert` CLI sub-command                                                      | S        | BE   | `manga-chef convert --input <dir> --format pdf --output <file>`              |
+| T-52 | Implement `convert` CLI sub-command                                                      | S        | BE   | Supports chapter-dir conversion and root-dir volume conversion (`--max-*` limits) |
 | T-53 | Write tests: convert 3-image fixture folder to PDF, verify output file exists + size > 0 | S        | BE   | Golden file test optional; existence + non-zero size is sufficient for CI    |
 
 ---
@@ -311,17 +311,62 @@
 
 ### 🔷 Epic 5.4 — Volume Merge
 
-> Merge multiple chapter image folders into a single output file.
+> Merge chapter directories into one or more volume directories, each respecting three
+> independent limits: maximum file size, maximum page count, and maximum chapter count.
+> Chapters are always kept whole — never split across volumes. The first limit breached
+> closes the current volume, regardless of which limit triggered.
+
+**Implemented behavior update:**
+- `convert --input <manga-root-dir>` now auto-plans volumes using these same limits and converts each planned volume.
+- `merge --input <manga-root-dir>` creates merged directories and optionally converts them.
+- Volume directory naming: `VOL_<VolumeSequence>_C<FromChapter>-C<ToChapter>`.
+- Optional cleanup: `--delete-merged-chapters` removes source chapter directories after a successful merge.
+- Optional conversion: `--convert pdf|epub|mobi` generates output files per merged volume.
+
+**Volume planning rules:**
+1. Chapters are packed greedily in order. Before appending a chapter, check all enabled limits against the post-addition totals.
+2. If any limit would be exceeded **and** the current volume is non-empty, flush the current volume and start a new one with that chapter.
+3. If a single chapter on its own exceeds a limit (e.g. a 600-page chapter with `--max-pages 500`), it is placed alone in its own volume and a warning is emitted. It is never skipped.
+4. All three limits are checked simultaneously — the first one breached wins.
+
+**Limits and defaults:**
+
+| Limit                         | Flag             | Default | Disable |
+| ----------------------------- | ---------------- | ------- | ------- |
+| Output file size              | `--max-size-mb`  | 200 MB  | `-1`    |
+| Total pages per volume        | `--max-pages`    | 500     | `-1`    |
+| Number of chapters per volume | `--max-chapters` | 30      | `-1`    |
+
+**Example** (from spec): `--max-pages 500`, each chapter has 18 pages.
+- Chapters 1–27 → 486 pages ≤ 500. Adding ch. 28 would make 504 > 500 → close volume 1.
+- Chapter 28 → volume 2.
 
 - **Priority:** P2
-- **Estimate:** M
+- **Estimate:** L
 - **Dependencies:** Epic 5.1, Epic 5.2
 
-| #    | Task                                                     | Estimate | Role | Notes                                                                                   |
-| ---- | -------------------------------------------------------- | -------- | ---- | --------------------------------------------------------------------------------------- |
-| T-60 | Implement `merge` CLI sub-command                        | M        | BE   | `manga-chef merge --input <manga-dir> --chapters 1-10 --format epub --output file.epub` |
-| T-61 | Implement chapter range parser (`1-10`, `1,5,10`, `all`) | S        | BE   | Shared utility reused by `download` sub-command                                         |
-| T-62 | Write tests for range parser edge cases                  | S        | BE   | Empty range, out-of-order, single chapter, `all`                                        |
+| #    | Task                                                                                       | Estimate | Role | Notes                                                                                                                                    |
+| ---- | ------------------------------------------------------------------------------------------ | -------- | ---- | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| T-60 | Implement merge limits model in CLI flow (`internal/cli/convert_volume.go`)               | S        | BE   | Fields: `MaxFileSizeMB`, `MaxPages`, `MaxChapters`; zero = use default, negative = disable                                             |
+| T-61 | Implement volume planner (`planVolumes`) with greedy packing                               | M        | BE   | Returns `[]volumePlan` with chapter slice, total pages, total bytes                                                                      |
+| T-62 | Handle oversized single chapters — place alone, emit warning                               | S        | BE   | Warning printed to CLI output                                                                                                             |
+| T-63 | Implement chapter directory discovery + ordering from root input                           | S        | BE   | Supports chapter folder patterns such as `chap-001`; falls back to lexical ordering when number parse fails                             |
+| T-64 | Implement `merge` CLI sub-command                                                          | M        | BE   | Flags: `--input`, `--output`, `--max-size-mb`, `--max-pages`, `--max-chapters`, `--delete-merged-chapters`, `--convert`, `--title`    |
+| T-65 | Implement merged directory naming convention                                                | S        | BE   | `VOL_<VolumeSequence>_C<FromChapter>-C<ToChapter>`                                                                                        |
+| T-66 | Add tests for planner + merge command behaviors                                             | M        | BE   | Covers split boundaries, directory naming, delete option, and convert option                                                              |
+| T-67 | Integrate root-directory conversion behavior into `convert` command                         | S        | BE   | `convert` auto-detects chapter dir vs manga root dir and applies volume planning for root input                                          |
+
+**Sub-tasks for T-61 (implemented):**
+- T-61.1: `would-exceed` check evaluated before append (not after) — ensures chapters stay whole
+- T-61.2: OR logic across all three limits — any single breach triggers the flush
+- T-61.3: Volume struct carries `Index` (1-based), `Chapters`, `TotalPages`, `TotalBytes`
+- T-61.4: Warnings are surfaced via CLI output
+
+**Sub-tasks for T-64 (implemented):**
+- T-64.1: Merge all discovered chapter directories from `--input`
+- T-64.2: Materialize merged images in each volume directory in deterministic page order
+- T-64.3: Optional converter invocation (PDF/EPUB/MOBI) once per volume
+- T-64.4: Output files for converted volumes use the merged volume basename (e.g. `VOL_001_C1-C5.pdf`)
 
 ---
 
@@ -345,8 +390,8 @@
 | T-64 | Implement `download` sub-command                                   | M        | BE   | Flags: `--source`, `--url`, `--chapters`, `--convert`, `--workers`, `--force`    |
 | T-65 | Implement `chapters` sub-command (list without downloading)        | S        | BE   | Flags: `--source`, `--url`; outputs table: #, title, URL                         |
 | T-66 | Implement `sources list` and `sources add` sub-commands            | S        | BE   | See Epic 2.1                                                                     |
-| T-67 | Implement `convert` sub-command                                    | S        | BE   | See Epic 5.1                                                                     |
-| T-68 | Implement `merge` sub-command                                      | S        | BE   | See Epic 5.4                                                                     |
+| T-67 | Implement `convert` sub-command                                    | S        | BE   | Supports chapter-directory conversion and root-directory volume conversion        |
+| T-68 | Implement `merge` sub-command                                      | S        | BE   | Creates `VOL_*` directories; supports optional delete + optional format conversion |
 | T-69 | Add `--log-level` global flag (debug / info / warn / error)        | XS       | BE   | Structured JSON logging via `log/slog` (stdlib, Go 1.21+)                        |
 | T-70 | Write integration test: full `download` flow with mock HTTP server | M        | BE   | Uses `httptest.Server`; verifies files created on disk in correct structure      |
 
@@ -360,7 +405,7 @@
 
 ### 🔷 Epic 7.1 — MVP Acceptance Run
 
-> Run the full download + convert pipeline for Dấu Ấn Rồng Thiêng ch.1–5 against truyenqqno.com.
+> Run the full download + convert pipeline for Dấu Ấn Rồng Thiêng ch.1–5 against truyenqqto.com.
 
 - **Priority:** P0
 - **Estimate:** M
@@ -368,7 +413,7 @@
 
 | #    | Task                                                                                               | Estimate | Role | Notes                                                                          |
 | ---- | -------------------------------------------------------------------------------------------------- | -------- | ---- | ------------------------------------------------------------------------------ |
-| T-71 | Prepare `sources/truyenqq.yml` pointing to `truyenqqno.com`                                        | XS       | BE   | Validated against live site                                                    |
+| T-71 | Prepare `sources/truyenqq.yml` pointing to `truyenqqto.com`                                        | XS       | BE   | Validated against live site                                                    |
 | T-72 | Manual run: `manga-chef download --source truyenqq --url <manga-url> --chapters 1-5 --convert pdf` | S        | BE   | Verify: 5 chapter folders created, 5 PDFs generated, correct page order        |
 | T-73 | Verify PDF opens correctly in a PDF viewer                                                         | XS       | QA   | Check first and last page of ch.1; confirm no corrupt images                   |
 | T-74 | Document the end-to-end command in `README.md` with TruyenQQ example                               | S        | Docs | Include: install, config, download, convert — working example using this manga |
@@ -416,7 +461,7 @@ Epic 6.1 (CLI)                  ← wires all above
 | ------------------------ | ------------------------------------------ |
 | Total Features           | 7                                          |
 | Total Epics              | 18                                         |
-| Total Tasks              | 75                                         |
+| Total Tasks              | 80                                         |
 | **Phase 1 (MVP) Tasks**  | **~45 tasks** (P0 only)                    |
 | **Phase 2 (V1) Tasks**   | **~30 tasks** (P1 + P2)                    |
 | Estimated Effort (MVP)   | ~6–8 person-weeks                          |
@@ -438,7 +483,7 @@ Epic 6.1 (CLI)                  ← wires all above
 
 **Assumptions:**
 - TruyenQQ image CDN URLs are direct HTTP links (not JavaScript-rendered or token-protected)
-- Dấu Ấn Rồng Thiêng (349 chapters) is fully available on `truyenqqno.com`
+- Dấu Ấn Rồng Thiêng (349 chapters) is fully available on `truyenqqto.com`
 - No Cloudflare challenge page protection on TruyenQQ (standard Go `http.Client` is sufficient)
 - Developer has Go 1.22+ installed locally
 

@@ -56,7 +56,7 @@ Download chapters with: manga-chef download --source <code> --url <manga-url>`,
 		&f.outputDir,
 		"output",
 		"",
-		"Directory where downloaded chapters and converted files are written. Defaults to manga slug if omitted.",
+		"Output path. For download, this is a directory (defaults to manga slug). For convert, this is the target file path.",
 	)
 	root.PersistentFlags().StringVar(
 		&f.logLevel,
@@ -68,6 +68,8 @@ Download chapters with: manga-chef download --source <code> --url <manga-url>`,
 	// ── Sub-commands ────────────────────────────────────────────────────────
 	root.AddCommand(NewSourcesCmd(func() string { return f.sourcesPath }))
 	root.AddCommand(newDownloadCmd(func() string { return f.sourcesPath }, func() string { return f.outputDir }))
+	root.AddCommand(newConvertCmd(func() string { return f.outputDir }))
+	root.AddCommand(newMergeCmd(func() string { return f.outputDir }))
 	return root
 }
 
