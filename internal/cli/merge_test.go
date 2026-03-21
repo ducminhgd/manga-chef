@@ -101,6 +101,54 @@ func TestMergeCommand_ConvertOptionPDF(t *testing.T) {
 	require.Greater(t, st.Size(), int64(0))
 }
 
+func TestMergeCommand_ConvertOptionMultipleFormats(t *testing.T) {
+	input := t.TempDir()
+	createChapter(t, input, 1, 2)
+	createChapter(t, input, 2, 2)
+
+	output := filepath.Join(t.TempDir(), "merged")
+
+	var buf bytes.Buffer
+	root := cli.NewRootCmd()
+	root.SetOut(&buf)
+	root.SetErr(&buf)
+	root.SetArgs([]string{"--output", output, "merge", "--input", input, "--max-size-mb", "-1", "--max-pages", "10", "--max-chapters", "-1", "--convert", "pdf,epub"})
+
+	err := root.Execute()
+	require.NoError(t, err)
+
+	for _, path := range []string{
+		filepath.Join(output, "VOL_001_C1-C2.pdf"),
+		filepath.Join(output, "VOL_001_C1-C2.epub"),
+	} {
+		st, err := os.Stat(path)
+		require.NoError(t, err)
+		require.Greater(t, st.Size(), int64(0))
+	}
+}
+
+func TestMergeCommand_ConvertOptionPDF_WithTitlePrefixesOutputFile(t *testing.T) {
+	input := t.TempDir()
+	createChapter(t, input, 1, 2)
+	createChapter(t, input, 2, 2)
+
+	output := filepath.Join(t.TempDir(), "merged")
+
+	var buf bytes.Buffer
+	root := cli.NewRootCmd()
+	root.SetOut(&buf)
+	root.SetErr(&buf)
+	root.SetArgs([]string{"--output", output, "merge", "--input", input, "--max-size-mb", "-1", "--max-pages", "10", "--max-chapters", "-1", "--convert", "pdf", "--title", "My Manga"})
+
+	err := root.Execute()
+	require.NoError(t, err)
+
+	pdfPath := filepath.Join(output, "my-manga-VOL_001_C1-C2.pdf")
+	st, err := os.Stat(pdfPath)
+	require.NoError(t, err)
+	require.Greater(t, st.Size(), int64(0))
+}
+
 func TestMergeCommand_ConvertOptionPDF_WithMislabeledImage(t *testing.T) {
 	input := t.TempDir()
 	chapterDir := filepath.Join(input, "chap-001")

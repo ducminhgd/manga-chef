@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -44,24 +45,30 @@ into one or more volume files based on merge limits.`,
 			if strings.TrimSpace(format) == "" {
 				return errors.New("--format is required")
 			}
-
-			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
-			defer cancel()
-
-			conv, err := newConverterByFormat(format)
+			formats, err := parseFormats(format)
 			if err != nil {
 				return err
 			}
+
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+			defer cancel()
 
 			inputKind, err := convertInputKind(inputDir)
 			if err != nil {
 				return err
 			}
 			if inputKind == "chapter" {
-				if err := conv.Convert(ctx, inputDir, outputPath, converter.Options{Title: title}); err != nil {
-					return fmt.Errorf("convert failed: %w", err)
+				for _, format := range formats {
+					conv, err := newConverterByFormat(format)
+					if err != nil {
+						return err
+					}
+					target := resolveChapterOutputPath(outputPath, format, len(formats))
+					if err := conv.Convert(ctx, inputDir, target, converter.Options{Title: title}); err != nil {
+						return fmt.Errorf("convert failed: %w", err)
+					}
+					fmt.Fprintf(cmd.OutOrStdout(), "Converted %s -> %s (%s)\n", filepath.Clean(inputDir), target, strings.ToLower(format))
 				}
-				fmt.Fprintf(cmd.OutOrStdout(), "Converted %s -> %s (%s)\n", filepath.Clean(inputDir), outputPath, strings.ToLower(format))
 				return nil
 			}
 
@@ -70,8 +77,14 @@ into one or more volume files based on merge limits.`,
 				MaxPages:      maxPages,
 				MaxChapters:   maxChapters,
 			}
-			if err := convertMangaRoot(ctx, conv, inputDir, outputPath, format, title, limits, cmd.OutOrStdout()); err != nil {
-				return fmt.Errorf("convert failed: %w", err)
+			for _, format := range formats {
+				conv, err := newConverterByFormat(format)
+				if err != nil {
+					return err
+				}
+				if err := convertMangaRoot(ctx, conv, inputDir, outputPath, format, title, limits, cmd.OutOrStdout()); err != nil {
+					return fmt.Errorf("convert failed: %w", err)
+				}
 			}
 			return nil
 		},
@@ -101,4 +114,41 @@ func newConverterByFormat(format string) (converter.ConverterInterface, error) {
 	default:
 		return nil, fmt.Errorf("unsupported format %q (supported: pdf, epub, mobi)", format)
 	}
+}
+
+func parseFormats(raw string) ([]string, error) {
+	parts := strings.Split(raw, ",")
+	formats := make([]string, 0, len(parts))
+	for _, part := range parts {
+		format := strings.ToLower(strings.TrimSpace(part))
+		if format == "" {
+			continue
+		}
+		if !slices.Contains(formats, format) {
+			formats = append(formats, format)
+		}
+	}
+	if len(formats) == 0 {
+		return nil, errors.New("at least one format is required")
+	}
+	for _, format := range formats {
+		if _, err := newConverterByFormat(format); err != nil {
+			return nil, err
+		}
+	}
+	return formats, nil
+}
+
+func resolveChapterOutputPath(outputPath, format string, totalFormats int) string {
+	cleanOut := filepath.Clean(outputPath)
+	if totalFormats <= 1 {
+		return cleanOut
+	}
+
+	ext := filepath.Ext(cleanOut)
+	if ext == "" {
+		return cleanOut + "." + strings.ToLower(format)
+	}
+	base := strings.TrimSuffix(cleanOut, ext)
+	return base + "." + strings.ToLower(format)
 }

@@ -73,6 +73,31 @@ func TestConvertCommand_SupportsEpub(t *testing.T) {
 	require.Greater(t, fi.Size(), int64(0))
 }
 
+func TestConvertCommand_SupportsMultipleFormats(t *testing.T) {
+	input := t.TempDir()
+	writeJPEG(t, filepath.Join(input, "001.jpg"), 320, 480)
+	writeJPEG(t, filepath.Join(input, "002.jpg"), 640, 480)
+
+	output := filepath.Join(t.TempDir(), "chapter.pdf")
+
+	var buf bytes.Buffer
+	root := cli.NewRootCmd()
+	root.SetOut(&buf)
+	root.SetErr(&buf)
+	root.SetArgs([]string{"convert", "--input", input, "--format", "pdf,epub", "--output", output})
+
+	err := root.Execute()
+	require.NoError(t, err)
+
+	fi, err := os.Stat(filepath.Join(filepath.Dir(output), "chapter.pdf"))
+	require.NoError(t, err)
+	require.Greater(t, fi.Size(), int64(0))
+
+	fi, err = os.Stat(filepath.Join(filepath.Dir(output), "chapter.epub"))
+	require.NoError(t, err)
+	require.Greater(t, fi.Size(), int64(0))
+}
+
 func TestConvertCommand_RootDirectorySplitsByMergeLimits(t *testing.T) {
 	rootInput := t.TempDir()
 	for i := 1; i <= 3; i++ {

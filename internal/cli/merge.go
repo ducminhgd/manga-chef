@@ -60,8 +60,9 @@ remove merged chapter directories after successful merge.`,
 			}
 
 			var conv converter.ConverterInterface
+			formats := make([]string, 0)
 			if strings.TrimSpace(convertFormat) != "" {
-				conv, err = newConverterByFormat(convertFormat)
+				formats, err = parseFormats(convertFormat)
 				if err != nil {
 					return err
 				}
@@ -81,17 +82,26 @@ remove merged chapter directories after successful merge.`,
 				}
 				fmt.Fprintf(cmd.OutOrStdout(), "Merged volume %03d -> %s (%d chapters, %d pages)\n", vol.Index, volDir, len(vol.Chapters), vol.TotalPages)
 
-				if conv != nil {
-					format := strings.ToLower(strings.TrimSpace(convertFormat))
-					outFile := filepath.Join(outputRoot, name+"."+format)
-					volTitle := title
-					if strings.TrimSpace(volTitle) == "" {
-						volTitle = volumeTitle("", inputDir, vol.Index, len(volumes))
+				if len(formats) > 0 {
+					for _, format := range formats {
+						conv, err = newConverterByFormat(format)
+						if err != nil {
+							return err
+						}
+						volTitle := title
+						if strings.TrimSpace(volTitle) == "" {
+							volTitle = volumeTitle("", inputDir, vol.Index, len(volumes))
+						}
+						fileName := name
+						if strings.TrimSpace(title) != "" {
+							fileName = sanitizeSlug(title) + "-" + name
+						}
+						outFile := filepath.Join(outputRoot, fileName+"."+format)
+						if err := conv.Convert(ctx, volDir, outFile, converter.Options{Title: volTitle}); err != nil {
+							return fmt.Errorf("converting merged volume %q: %w", name, err)
+						}
+						fmt.Fprintf(cmd.OutOrStdout(), "Converted %s -> %s (%s)\n", volDir, outFile, format)
 					}
-					if err := conv.Convert(ctx, volDir, outFile, converter.Options{Title: volTitle}); err != nil {
-						return fmt.Errorf("converting merged volume %q: %w", name, err)
-					}
-					fmt.Fprintf(cmd.OutOrStdout(), "Converted %s -> %s (%s)\n", volDir, outFile, format)
 				}
 
 				if deleteMergedChapters {
