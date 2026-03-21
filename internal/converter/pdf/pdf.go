@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"image"
 	_ "image/jpeg"
+	"io"
 	"image/png"
 	"os"
 	"path/filepath"
@@ -77,12 +78,26 @@ func (c *Converter) Convert(ctx context.Context, inputDir, outputPath string, op
 		}
 
 		pathToEmbed := imgPath
-		if strings.EqualFold(filepath.Ext(imgPath), ".webp") {
+		actualExt, err := converter.DetectImageExtension(imgPath)
+		if err != nil {
+			return fmt.Errorf("detecting image format %q: %w", imgPath, err)
+		}
+
+		switch actualExt {
+		case ".webp":
 			pathToEmbed, err = webpToTempPNG(imgPath)
 			if err != nil {
 				return fmt.Errorf("converting webp %q: %w", imgPath, err)
 			}
 			tmpFiles = append(tmpFiles, pathToEmbed)
+		default:
+			if !strings.EqualFold(filepath.Ext(imgPath), actualExt) {
+				pathToEmbed, err = copyToTempWithExt(imgPath, actualExt)
+				if err != nil {
+					return fmt.Errorf("normalizing image extension for %q: %w", imgPath, err)
+				}
+				tmpFiles = append(tmpFiles, pathToEmbed)
+			}
 		}
 
 		cfg, err := imageConfig(pathToEmbed)
@@ -165,6 +180,27 @@ func webpToTempPNG(path string) (string, error) {
 	defer tmp.Close()
 
 	if err := png.Encode(tmp, img); err != nil {
+		_ = os.Remove(tmp.Name())
+		return "", err
+	}
+	return tmp.Name(), nil
+}
+
+func copyToTempWithExt(src, ext string) (string, error) {
+	tmp, err := os.CreateTemp("", "manga-chef-*"+ext)
+	if err != nil {
+		return "", err
+	}
+	defer tmp.Close()
+
+	in, err := os.Open(src)
+	if err != nil {
+		_ = os.Remove(tmp.Name())
+		return "", err
+	}
+	defer in.Close()
+
+	if _, err := io.Copy(tmp, in); err != nil {
 		_ = os.Remove(tmp.Name())
 		return "", err
 	}

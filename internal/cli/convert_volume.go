@@ -280,7 +280,10 @@ func buildVolumeTempDir(volume volumePlan) (string, error) {
 	page := 1
 	for _, ch := range volume.Chapters {
 		for _, imgPath := range ch.Images {
-			ext := strings.ToLower(filepath.Ext(imgPath))
+			ext, err := converter.DetectImageExtension(imgPath)
+			if err != nil {
+				return "", fmt.Errorf("detecting image format for %q: %w", imgPath, err)
+			}
 			target := filepath.Join(tmpDir, fmt.Sprintf("%05d%s", page, ext))
 			if err := copyFilePath(imgPath, target); err != nil {
 				return "", err

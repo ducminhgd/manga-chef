@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"image/png"
 	"os"
 	"path/filepath"
@@ -70,11 +71,21 @@ func (c *Converter) Convert(ctx context.Context, inputDir, outputPath string, op
 
 		sourcePath := imgPath
 		internalName := filepath.Base(imgPath)
+		actualExt, err := converter.DetectImageExtension(imgPath)
+		if err != nil {
+			return fmt.Errorf("detecting image format for %q: %w", imgPath, err)
+		}
 
-		if strings.EqualFold(filepath.Ext(imgPath), ".webp") {
+		if actualExt == ".webp" {
 			sourcePath, internalName, err = webpToTempPNG(imgPath, i+1)
 			if err != nil {
 				return fmt.Errorf("converting webp %q: %w", imgPath, err)
+			}
+			tmpFiles = append(tmpFiles, sourcePath)
+		} else if !strings.EqualFold(filepath.Ext(imgPath), actualExt) {
+			sourcePath, internalName, err = copyToTempWithExt(imgPath, i+1, actualExt)
+			if err != nil {
+				return fmt.Errorf("normalizing image extension for %q: %w", imgPath, err)
 			}
 			tmpFiles = append(tmpFiles, sourcePath)
 		}
@@ -197,6 +208,27 @@ func webpToTempPNG(path string, idx int) (string, string, error) {
 		return "", "", err
 	}
 	return tmp.Name(), fmt.Sprintf("%03d.png", idx), nil
+}
+
+func copyToTempWithExt(path string, idx int, ext string) (string, string, error) {
+	tmp, err := os.CreateTemp("", "manga-chef-epub-*"+ext)
+	if err != nil {
+		return "", "", err
+	}
+	defer tmp.Close()
+
+	in, err := os.Open(path)
+	if err != nil {
+		_ = os.Remove(tmp.Name())
+		return "", "", err
+	}
+	defer in.Close()
+
+	if _, err := io.Copy(tmp, in); err != nil {
+		_ = os.Remove(tmp.Name())
+		return "", "", err
+	}
+	return tmp.Name(), fmt.Sprintf("%03d%s", idx, ext), nil
 }
 
 func cleanup(paths []string) {

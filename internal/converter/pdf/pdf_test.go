@@ -32,6 +32,22 @@ func TestConvert_CreatesPDFFromThreeImages(t *testing.T) {
 	require.Greater(t, fi.Size(), int64(0))
 }
 
+func TestConvert_AcceptsMislabeledPNGWithJPGExtension(t *testing.T) {
+	input := t.TempDir()
+	require.NoError(t, writePNG(filepath.Join(input, "001.jpg"), 500, 800))
+	require.NoError(t, writeJPEG(filepath.Join(input, "002.jpg"), 640, 640))
+
+	out := filepath.Join(t.TempDir(), "chapter-001.pdf")
+
+	conv := New()
+	err := conv.Convert(context.Background(), input, out, converter.Options{Title: "Chapter 1"})
+	require.NoError(t, err)
+
+	fi, err := os.Stat(out)
+	require.NoError(t, err)
+	require.Greater(t, fi.Size(), int64(0))
+}
+
 func writeJPEG(path string, w, h int) error {
 	f, err := os.Create(path)
 	if err != nil {

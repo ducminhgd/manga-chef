@@ -2,6 +2,9 @@ package cli_test
 
 import (
 	"bytes"
+	"image"
+	"image/color"
+	"image/png"
 	"os"
 	"path/filepath"
 	"testing"
@@ -98,6 +101,33 @@ func TestMergeCommand_ConvertOptionPDF(t *testing.T) {
 	require.Greater(t, st.Size(), int64(0))
 }
 
+func TestMergeCommand_ConvertOptionPDF_WithMislabeledImage(t *testing.T) {
+	input := t.TempDir()
+	chapterDir := filepath.Join(input, "chap-001")
+	require.NoError(t, os.MkdirAll(chapterDir, 0o755))
+	writePNGWithJPGName(t, filepath.Join(chapterDir, "001.jpg"), 320, 480)
+	writeJPEG(t, filepath.Join(chapterDir, "002.jpg"), 320, 480)
+
+	output := filepath.Join(t.TempDir(), "merged")
+
+	var buf bytes.Buffer
+	root := cli.NewRootCmd()
+	root.SetOut(&buf)
+	root.SetErr(&buf)
+	root.SetArgs([]string{"--output", output, "merge", "--input", input, "--max-size-mb", "-1", "--max-pages", "10", "--max-chapters", "-1", "--convert", "pdf"})
+
+	err := root.Execute()
+	require.NoError(t, err)
+
+	pdfPath := filepath.Join(output, "VOL_001_C1-C1.pdf")
+	st, err := os.Stat(pdfPath)
+	require.NoError(t, err)
+	require.Greater(t, st.Size(), int64(0))
+
+	_, err = os.Stat(filepath.Join(output, "VOL_001_C1-C1", "00001.png"))
+	require.NoError(t, err)
+}
+
 func createChapter(t *testing.T, root string, chapterNum, pages int) {
 	t.Helper()
 	chapterDir := filepath.Join(root, "chap-"+leftPad3(chapterNum))
@@ -105,4 +135,19 @@ func createChapter(t *testing.T, root string, chapterNum, pages int) {
 	for i := 1; i <= pages; i++ {
 		writeJPEG(t, filepath.Join(chapterDir, leftPad3(i)+".jpg"), 320, 480)
 	}
+}
+
+func writePNGWithJPGName(t *testing.T, path string, w, h int) {
+	t.Helper()
+	f, err := os.Create(path)
+	require.NoError(t, err)
+	defer f.Close()
+
+	img := image.NewRGBA(image.Rect(0, 0, w, h))
+	for y := 0; y < h; y++ {
+		for x := 0; x < w; x++ {
+			img.Set(x, y, color.RGBA{R: 24, G: 160, B: 120, A: 255})
+		}
+	}
+	require.NoError(t, png.Encode(f, img))
 }
