@@ -34,7 +34,7 @@ func (t *terminalProgressReporter) OnStart(chapter sources.Chapter, total int) {
 	fmt.Fprintf(t.out, "Downloading chapter %.2f - %q: 0/%d\n", chapter.Number, chapter.Title, total)
 }
 
-func (t *terminalProgressReporter) OnProgress(chapter sources.Chapter, done int, total int) {
+func (t *terminalProgressReporter) OnProgress(chapter sources.Chapter, done, total int) {
 	fmt.Fprintf(t.out, "Chapter %.2f: %d/%d pages downloaded\n", chapter.Number, done, total)
 }
 

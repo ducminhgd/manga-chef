@@ -33,86 +33,16 @@ Volume directory names follow: VOL_<VolumeSequence>_C<FromChapter>-C<ToChapter>.
 You can optionally convert each merged volume to pdf/epub/mobi and optionally
 remove merged chapter directories after successful merge.`,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			if strings.TrimSpace(inputDir) == "" {
-				return errors.New("--input is required")
-			}
-
-			chapters, err := collectChapterDirs(inputDir)
-			if err != nil {
-				return err
-			}
-			if len(chapters) == 0 {
-				return errors.New("no chapter directories with images were found")
-			}
-
-			limits := mergeLimits{MaxFileSizeMB: maxSizeMB, MaxPages: maxPages, MaxChapters: maxChapters}
-			volumes, warnings := planVolumes(chapters, limits)
-			for _, w := range warnings {
-				fmt.Fprintf(cmd.OutOrStdout(), "warning: %s\n", w)
-			}
-
-			outputRoot := strings.TrimSpace(getOutputPath())
-			if outputRoot == "" {
-				outputRoot = inputDir
-			}
-			if err := os.MkdirAll(outputRoot, 0o755); err != nil {
-				return fmt.Errorf("creating output root %q: %w", outputRoot, err)
-			}
-
-			var conv converter.ConverterInterface
-			formats := make([]string, 0)
-			if strings.TrimSpace(convertFormat) != "" {
-				formats, err = parseFormats(convertFormat)
-				if err != nil {
-					return err
-				}
-			}
-
-			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
-			defer cancel()
-
-			for _, vol := range volumes {
-				name := volumeDirName(vol)
-				volDir := filepath.Join(outputRoot, name)
-				if err := os.MkdirAll(volDir, 0o755); err != nil {
-					return fmt.Errorf("creating volume directory %q: %w", volDir, err)
-				}
-				if err := materializeVolumeIntoDir(vol, volDir); err != nil {
-					return err
-				}
-				fmt.Fprintf(cmd.OutOrStdout(), "Merged volume %03d -> %s (%d chapters, %d pages)\n", vol.Index, volDir, len(vol.Chapters), vol.TotalPages)
-
-				if len(formats) > 0 {
-					for _, format := range formats {
-						conv, err = newConverterByFormat(format)
-						if err != nil {
-							return err
-						}
-						volTitle := title
-						if strings.TrimSpace(volTitle) == "" {
-							volTitle = volumeTitle("", inputDir, vol.Index, len(volumes))
-						}
-						fileName := name
-						if strings.TrimSpace(title) != "" {
-							fileName = sanitizeSlug(title) + "-" + name
-						}
-						outFile := filepath.Join(outputRoot, fileName+"."+format)
-						if err := conv.Convert(ctx, volDir, outFile, converter.Options{Title: volTitle}); err != nil {
-							return fmt.Errorf("converting merged volume %q: %w", name, err)
-						}
-						fmt.Fprintf(cmd.OutOrStdout(), "Converted %s -> %s (%s)\n", volDir, outFile, format)
-					}
-				}
-
-				if deleteMergedChapters {
-					for _, ch := range vol.Chapters {
-						if err := os.RemoveAll(ch.Path); err != nil {
-							return fmt.Errorf("deleting merged chapter directory %q: %w", ch.Path, err)
-						}
-					}
-				}
-			}
-			return nil
+			return runMergeCmd(cmd, &mergeCommandOptions{
+				inputDir:             inputDir,
+				outputRoot:           strings.TrimSpace(getOutputPath()),
+				maxSizeMB:            maxSizeMB,
+				maxPages:             maxPages,
+				maxChapters:          maxChapters,
+				deleteMergedChapters: deleteMergedChapters,
+				convertFormat:        convertFormat,
+				title:                title,
+			})
 		},
 	}
 
@@ -126,16 +56,70 @@ remove merged chapter directories after successful merge.`,
 	return cmd
 }
 
+type mergeCommandOptions struct {
+	inputDir             string
+	outputRoot           string
+	maxSizeMB            int
+	maxPages             int
+	maxChapters          int
+	deleteMergedChapters bool
+	convertFormat        string
+	title                string
+}
+
+func runMergeCmd(cmd *cobra.Command, opts *mergeCommandOptions) error {
+	if strings.TrimSpace(opts.inputDir) == "" {
+		return errors.New("--input is required")
+	}
+
+	chapters, err := collectChapterDirs(opts.inputDir)
+	if err != nil {
+		return err
+	}
+	if len(chapters) == 0 {
+		return errors.New("no chapter directories with images were found")
+	}
+
+	limits := mergeLimits{MaxFileSizeMB: opts.maxSizeMB, MaxPages: opts.maxPages, MaxChapters: opts.maxChapters}
+	volumes, warnings := planVolumes(chapters, limits)
+	for _, warning := range warnings {
+		fmt.Fprintf(cmd.OutOrStdout(), "warning: %s\n", warning)
+	}
+
+	outputRoot := opts.outputRoot
+	if outputRoot == "" {
+		outputRoot = opts.inputDir
+	}
+	if err := os.MkdirAll(outputRoot, 0o755); err != nil {
+		return fmt.Errorf("creating output root %q: %w", outputRoot, err)
+	}
+
+	formats, err := parseOptionalFormats(opts.convertFormat)
+	if err != nil {
+		return err
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
+	defer cancel()
+
+	for _, volume := range volumes {
+		if err := processMergedVolume(ctx, cmd, outputRoot, opts, volume, len(volumes), formats); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func volumeDirName(v volumePlan) string {
 	if len(v.Chapters) == 0 {
 		return fmt.Sprintf("VOL_%03d_C0-C0", v.Index)
 	}
-	from := chapterLabelForName(v.Chapters[0])
-	to := chapterLabelForName(v.Chapters[len(v.Chapters)-1])
+	from := chapterLabelForName(&v.Chapters[0])
+	to := chapterLabelForName(&v.Chapters[len(v.Chapters)-1])
 	return fmt.Sprintf("VOL_%03d_C%s-C%s", v.Index, from, to)
 }
 
-func chapterLabelForName(ch chapterInfo) string {
+func chapterLabelForName(ch *chapterInfo) string {
 	if ch.HasNumber {
 		if ch.Number == float64(int64(ch.Number)) {
 			return strconv.FormatInt(int64(ch.Number), 10)
@@ -147,6 +131,67 @@ func chapterLabelForName(ch chapterInfo) string {
 		return "0"
 	}
 	return sanitizeSlug(name)
+}
+
+func parseOptionalFormats(raw string) ([]string, error) {
+	if strings.TrimSpace(raw) == "" {
+		return nil, nil
+	}
+	return parseFormats(raw)
+}
+
+func processMergedVolume(ctx context.Context, cmd *cobra.Command, outputRoot string, opts *mergeCommandOptions, vol volumePlan, totalVolumes int, formats []string) error {
+	name := volumeDirName(vol)
+	volDir := filepath.Join(outputRoot, name)
+	if err := os.MkdirAll(volDir, 0o755); err != nil {
+		return fmt.Errorf("creating volume directory %q: %w", volDir, err)
+	}
+	if err := materializeVolumeIntoDir(vol, volDir); err != nil {
+		return err
+	}
+	fmt.Fprintf(cmd.OutOrStdout(), "Merged volume %03d -> %s (%d chapters, %d pages)\n", vol.Index, volDir, len(vol.Chapters), vol.TotalPages)
+
+	if err := convertMergedVolume(ctx, cmd, outputRoot, opts, vol, totalVolumes, formats, name, volDir); err != nil {
+		return err
+	}
+	if opts.deleteMergedChapters {
+		if err := deleteMergedChapterDirs(vol); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func convertMergedVolume(ctx context.Context, cmd *cobra.Command, outputRoot string, opts *mergeCommandOptions, vol volumePlan, totalVolumes int, formats []string, name, volDir string) error {
+	for _, format := range formats {
+		conv, err := newConverterByFormat(format)
+		if err != nil {
+			return err
+		}
+		volTitle := opts.title
+		if strings.TrimSpace(volTitle) == "" {
+			volTitle = volumeTitle("", opts.inputDir, vol.Index, totalVolumes)
+		}
+		fileName := name
+		if strings.TrimSpace(opts.title) != "" {
+			fileName = sanitizeSlug(opts.title) + "-" + name
+		}
+		outFile := filepath.Join(outputRoot, fileName+"."+format)
+		if err := conv.Convert(ctx, volDir, outFile, converter.Options{Title: volTitle}); err != nil {
+			return fmt.Errorf("converting merged volume %q: %w", name, err)
+		}
+		fmt.Fprintf(cmd.OutOrStdout(), "Converted %s -> %s (%s)\n", volDir, outFile, format)
+	}
+	return nil
+}
+
+func deleteMergedChapterDirs(vol volumePlan) error {
+	for _, chapter := range vol.Chapters {
+		if err := os.RemoveAll(chapter.Path); err != nil {
+			return fmt.Errorf("deleting merged chapter directory %q: %w", chapter.Path, err)
+		}
+	}
+	return nil
 }
 
 func materializeVolumeIntoDir(v volumePlan, outDir string) error {

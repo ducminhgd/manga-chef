@@ -30,11 +30,12 @@ func TestDownloadChapter_CreatesFiles(t *testing.T) {
 	tmp := t.TempDir()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte("image"))
+		_, err := w.Write([]byte("image"))
+		require.NoError(t, err)
 	}))
 	defer srv.Close()
 
-	d, err := New(&fakeScraper{images: map[string][]string{"url": {srv.URL + "/1.jpg", srv.URL + "/2.jpg"}}}, Options{OutDir: tmp, Workers: 2})
+	d, err := New(&fakeScraper{images: map[string][]string{"url": {srv.URL + "/1.jpg", srv.URL + "/2.jpg"}}}, &Options{OutDir: tmp, Workers: 2})
 	require.NoError(t, err)
 
 	err = d.DownloadChapter(context.Background(), "mycode", sources.Chapter{Number: 1, Title: "ch1", URL: "url"})
@@ -55,11 +56,12 @@ func TestDownloadChapter_RetriesTransientFailures(t *testing.T) {
 			return
 		}
 		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte("image"))
+		_, err := w.Write([]byte("image"))
+		require.NoError(t, err)
 	}))
 	defer srv.Close()
 
-	d, err := New(&fakeScraper{images: map[string][]string{"url": {srv.URL + "/1.jpg"}}}, Options{OutDir: tmp, Retries: 2, RetryInitialMs: 1, Workers: 1})
+	d, err := New(&fakeScraper{images: map[string][]string{"url": {srv.URL + "/1.jpg"}}}, &Options{OutDir: tmp, Retries: 2, RetryInitialMs: 1, Workers: 1})
 	require.NoError(t, err)
 
 	err = d.DownloadChapter(context.Background(), "mycode", sources.Chapter{Number: 1, Title: "ch1", URL: "url"})
@@ -80,7 +82,7 @@ func TestDownloadChapter_DoesNotRetryClientErrors(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	d, err := New(&fakeScraper{images: map[string][]string{"url": {srv.URL + "/1.jpg"}}}, Options{OutDir: tmp, Retries: 3, RetryInitialMs: 1, Workers: 1})
+	d, err := New(&fakeScraper{images: map[string][]string{"url": {srv.URL + "/1.jpg"}}}, &Options{OutDir: tmp, Retries: 3, RetryInitialMs: 1, Workers: 1})
 	require.NoError(t, err)
 
 	err = d.DownloadChapter(context.Background(), "mycode", sources.Chapter{Number: 1, Title: "ch1", URL: "url"})
@@ -93,12 +95,13 @@ func TestDownloadChapter_ProgressReporter(t *testing.T) {
 	tmp := t.TempDir()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte("image"))
+		_, err := w.Write([]byte("image"))
+		require.NoError(t, err)
 	}))
 	defer srv.Close()
 
 	reporter := &fakeProgressReporter{}
-	d, err := New(&fakeScraper{images: map[string][]string{"url": {srv.URL + "/1.jpg", srv.URL + "/2.jpg"}}}, Options{OutDir: tmp, Workers: 2, Reporter: reporter})
+	d, err := New(&fakeScraper{images: map[string][]string{"url": {srv.URL + "/1.jpg", srv.URL + "/2.jpg"}}}, &Options{OutDir: tmp, Workers: 2, Reporter: reporter})
 	require.NoError(t, err)
 
 	err = d.DownloadChapter(context.Background(), "mycode", sources.Chapter{Number: 1, Title: "ch1", URL: "url"})
@@ -118,11 +121,12 @@ func TestDownloadChapter_429RetryCyclesAfterThreeAttempts(t *testing.T) {
 			return
 		}
 		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte("image"))
+		_, err := w.Write([]byte("image"))
+		require.NoError(t, err)
 	}))
 	defer srv.Close()
 
-	d, err := New(&fakeScraper{images: map[string][]string{"url": {srv.URL + "/1.jpg"}}}, Options{
+	d, err := New(&fakeScraper{images: map[string][]string{"url": {srv.URL + "/1.jpg"}}}, &Options{
 		OutDir:         tmp,
 		RetryInitialMs: 1,
 		MaxWaitSec:     0, // keep test fast; still exercises cycle reset
@@ -145,11 +149,12 @@ func TestDownloadChapter_403RetryCyclesAfterThreeAttempts(t *testing.T) {
 			return
 		}
 		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte("image"))
+		_, err := w.Write([]byte("image"))
+		require.NoError(t, err)
 	}))
 	defer srv.Close()
 
-	d, err := New(&fakeScraper{images: map[string][]string{"url": {srv.URL + "/1.jpg"}}}, Options{
+	d, err := New(&fakeScraper{images: map[string][]string{"url": {srv.URL + "/1.jpg"}}}, &Options{
 		OutDir:         tmp,
 		RetryInitialMs: 1,
 		MaxWaitSec:     0, // keep test fast; still exercises cycle reset
@@ -172,7 +177,7 @@ type fakeProgressReporter struct {
 func (f *fakeProgressReporter) OnStart(chapter sources.Chapter, total int) {
 	f.starts++
 }
-func (f *fakeProgressReporter) OnProgress(chapter sources.Chapter, done int, total int) {
+func (f *fakeProgressReporter) OnProgress(chapter sources.Chapter, done, total int) {
 	f.progressEvents++
 }
 func (f *fakeProgressReporter) OnDone(chapter sources.Chapter) {

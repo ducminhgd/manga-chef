@@ -9,7 +9,6 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
-	"regexp"
 	"sort"
 	"strings"
 	"sync"
@@ -18,8 +17,6 @@ import (
 	"github.com/ducminhgd/manga-chef/internal/scraper"
 	"github.com/ducminhgd/manga-chef/pkg/sources"
 )
-
-var invalidPathChar = regexp.MustCompile(`[^a-zA-Z0-9 _\-]`)
 
 // Options configures the downloader behavior.
 // ProgressReporter receives download progress events.
@@ -53,9 +50,12 @@ type Downloader struct {
 }
 
 // New creates a Downloader.
-func New(scraper scraper.ScraperInterface, opts Options) (*Downloader, error) {
+func New(scraper scraper.ScraperInterface, opts *Options) (*Downloader, error) {
 	if scraper == nil {
 		return nil, errors.New("scraper is required")
+	}
+	if opts == nil {
+		opts = &Options{}
 	}
 	if opts.OutDir == "" {
 		opts.OutDir = "."
@@ -87,7 +87,7 @@ func New(scraper scraper.ScraperInterface, opts Options) (*Downloader, error) {
 	if opts.Headers == nil {
 		opts.Headers = map[string]string{}
 	}
-	return &Downloader{scraper: scraper, opts: opts, httpClient: &http.Client{Timeout: time.Duration(opts.RequestTimeoutSec) * time.Second}}, nil
+	return &Downloader{scraper: scraper, opts: *opts, httpClient: &http.Client{Timeout: time.Duration(opts.RequestTimeoutSec) * time.Second}}, nil
 }
 
 // DownloadManga downloads the given chapters concurrently.
@@ -101,7 +101,7 @@ func (d *Downloader) DownloadManga(ctx context.Context, sourceCode string, chapt
 	for _, ch := range chapters {
 		select {
 		case <-ctx.Done():
-			return ctx.Err()
+			return wrapContextErr(ctx, "download manga")
 		default:
 		}
 		if err := d.DownloadChapter(ctx, sourceCode, ch); err != nil {
@@ -135,74 +135,12 @@ func (d *Downloader) DownloadChapter(ctx context.Context, sourceCode string, cha
 		return fmt.Errorf("create folder %q: %w", folder, err)
 	}
 
-	existing := map[string]struct{}{}
-	if entries, err := os.ReadDir(folder); err == nil {
-		for _, e := range entries {
-			existing[e.Name()] = struct{}{}
-		}
-	}
-
-	wg := sync.WaitGroup{}
-	sem := make(chan struct{}, d.opts.Workers)
-
 	if d.opts.Reporter != nil {
 		d.opts.Reporter.OnStart(chapter, len(urls))
 	}
-	total := len(urls)
-	done := 0
-	mu := sync.Mutex{}
-	reportDone := func() {
-		mu.Lock()
-		done++
-		reporter := d.opts.Reporter
-		if reporter != nil {
-			reporter.OnProgress(chapter, done, total)
-		}
-		mu.Unlock()
-	}
-
-	failCount := 0
-	var firstErr error
-	errMu := sync.Mutex{}
-
-	for idx, imgURL := range urls {
-		idx, imgURL := idx, imgURL
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		default:
-		}
-
-		pagePath := pagePath(folder, idx+1, imgURL)
-		if _, found := existing[filepath.Base(pagePath)]; found {
-			reportDone()
-			continue
-		}
-
-		sem <- struct{}{}
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			defer func() { <-sem }()
-
-			err := d.downloadImageWithRetry(ctx, folder, idx+1, imgURL)
-			if err != nil {
-				errMu.Lock()
-				if firstErr == nil {
-					firstErr = err
-				}
-				failCount++
-				errMu.Unlock()
-				if d.opts.Reporter != nil {
-					d.opts.Reporter.OnError(err)
-				}
-				return
-			}
-			reportDone()
-		}()
-	}
-
-	wg.Wait()
+	existing := existingFiles(folder)
+	reportDone := newProgressReporter(chapter, len(urls), d.opts.Reporter)
+	failCount, firstErr := d.downloadChapterImages(ctx, folder, urls, existing, reportDone)
 	if d.opts.Reporter != nil {
 		d.opts.Reporter.OnDone(chapter)
 	}
@@ -223,50 +161,15 @@ func (d *Downloader) downloadImageWithRetry(ctx context.Context, folder string, 
 	const attemptsPerCycle = 3
 
 	for {
-		backoffMs := int64(d.opts.RetryInitialMs)
-		hitRetryCycleStatus := false
-		for attempt := 1; attempt <= attemptsPerCycle; attempt++ {
-			if attempt > 1 {
-				select {
-				case <-ctx.Done():
-					return ctx.Err()
-				case <-time.After(time.Duration(backoffMs) * time.Millisecond):
-				}
-				backoffMs *= 2
-			}
-
-			err := d.downloadImage(ctx, folder, page, imageURL)
-			if err == nil {
-				return nil
-			}
-			if isRetryCycleStatus(err) {
-				hitRetryCycleStatus = true
-				continue
-			}
-			if !shouldRetryDownload(err) {
-				return fmt.Errorf("download image %q failed permanently: %w", imageURL, err)
-			}
-			// Retryable non-429 errors are retried within this cycle only.
-			if attempt == attemptsPerCycle {
-				return fmt.Errorf("download image %q failed after %d attempts: %w", imageURL, attemptsPerCycle, err)
-			}
+		hitRetryCycleStatus, err := d.runRetryCycle(ctx, folder, page, imageURL, attemptsPerCycle)
+		if err == nil {
+			return nil
 		}
-
-		// Only 429 should trigger wait + reset loop.
 		if !hitRetryCycleStatus {
-			return fmt.Errorf("download image %q failed after %d attempts", imageURL, attemptsPerCycle)
+			return err
 		}
-
-		waitFor := time.Duration(d.opts.MaxWaitSec) * time.Second
-		if waitFor > 0 {
-			select {
-			case <-ctx.Done():
-				return ctx.Err()
-			case <-time.After(waitFor):
-			}
-		}
-		if ctx.Err() != nil {
-			return ctx.Err()
+		if err := waitForRetryCycle(ctx, time.Duration(d.opts.MaxWaitSec)*time.Second); err != nil {
+			return err
 		}
 	}
 }
@@ -303,7 +206,7 @@ func (d *Downloader) downloadImage(ctx context.Context, folder string, page int,
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, imageURL, http.NoBody)
 	if err != nil {
-		return err
+		return fmt.Errorf("create request for %q: %w", imageURL, err)
 	}
 	for k, v := range d.opts.Headers {
 		req.Header.Set(k, v)
@@ -311,7 +214,7 @@ func (d *Downloader) downloadImage(ctx context.Context, folder string, page int,
 
 	resp, err := d.httpClient.Do(req)
 	if err != nil {
-		return err
+		return fmt.Errorf("request image %q: %w", imageURL, err)
 	}
 	defer resp.Body.Close()
 
@@ -323,12 +226,12 @@ func (d *Downloader) downloadImage(ctx context.Context, folder string, page int,
 	path := filepath.Join(folder, fmt.Sprintf("%03d%s", page, ext))
 	f, err := os.Create(path)
 	if err != nil {
-		return err
+		return fmt.Errorf("create image file %q: %w", path, err)
 	}
 	defer f.Close()
 
 	if _, err := io.Copy(f, resp.Body); err != nil {
-		return err
+		return fmt.Errorf("write image file %q: %w", path, err)
 	}
 	return nil
 }
@@ -377,16 +280,7 @@ func chapterFolder(base, sourceCode string, chapter sources.Chapter) string {
 	if chapter.Number != float64(int(chapter.Number)) {
 		chapNum = fmt.Sprintf("chap-%g", chapter.Number)
 	}
-	return filepath.Join(base, chapNum)
-}
-
-func sanitizePath(input string) string {
-	cleaned := invalidPathChar.ReplaceAllString(input, "-")
-	cleaned = strings.TrimSpace(cleaned)
-	if cleaned == "" {
-		return "unnamed"
-	}
-	return cleaned
+	return filepath.Join(base, sourceCode, chapNum)
 }
 
 func imageExtension(imageURL string) string {
@@ -398,4 +292,126 @@ func imageExtension(imageURL string) string {
 		}
 	}
 	return ".jpg"
+}
+
+func existingFiles(folder string) map[string]struct{} {
+	existing := map[string]struct{}{}
+	entries, err := os.ReadDir(folder)
+	if err != nil {
+		return existing
+	}
+	for _, entry := range entries {
+		existing[entry.Name()] = struct{}{}
+	}
+	return existing
+}
+
+func newProgressReporter(chapter sources.Chapter, total int, reporter ProgressReporter) func() {
+	done := 0
+	var mu sync.Mutex
+	return func() {
+		mu.Lock()
+		defer mu.Unlock()
+		done++
+		if reporter != nil {
+			reporter.OnProgress(chapter, done, total)
+		}
+	}
+}
+
+func (d *Downloader) downloadChapterImages(ctx context.Context, folder string, urls []string, existing map[string]struct{}, reportDone func()) (failCount int, firstErr error) {
+	var (
+		wg    sync.WaitGroup
+		sem   = make(chan struct{}, d.opts.Workers)
+		errMu sync.Mutex
+	)
+
+	for idx, imgURL := range urls {
+		if err := wrapContextErr(ctx, "download chapter"); err != nil {
+			return failCount, err
+		}
+		pagePath := pagePath(folder, idx+1, imgURL)
+		if _, found := existing[filepath.Base(pagePath)]; found {
+			reportDone()
+			continue
+		}
+
+		sem <- struct{}{}
+		wg.Add(1)
+		go func(page int, imageURL string) {
+			defer wg.Done()
+			defer func() { <-sem }()
+
+			if err := d.downloadImageWithRetry(ctx, folder, page, imageURL); err != nil {
+				errMu.Lock()
+				if firstErr == nil {
+					firstErr = err
+				}
+				failCount++
+				errMu.Unlock()
+				if d.opts.Reporter != nil {
+					d.opts.Reporter.OnError(err)
+				}
+				return
+			}
+			reportDone()
+		}(idx+1, imgURL)
+	}
+
+	wg.Wait()
+	return failCount, firstErr
+}
+
+func (d *Downloader) runRetryCycle(ctx context.Context, folder string, page int, imageURL string, attemptsPerCycle int) (hitRetryCycleStatus bool, err error) {
+	backoffMs := int64(d.opts.RetryInitialMs)
+	for attempt := 1; attempt <= attemptsPerCycle; attempt++ {
+		if attempt > 1 {
+			if err := sleepWithContext(ctx, time.Duration(backoffMs)*time.Millisecond, "download retry backoff"); err != nil {
+				return hitRetryCycleStatus, err
+			}
+			backoffMs *= 2
+		}
+
+		err = d.downloadImage(ctx, folder, page, imageURL)
+		if err == nil {
+			return hitRetryCycleStatus, nil
+		}
+		if isRetryCycleStatus(err) {
+			hitRetryCycleStatus = true
+			continue
+		}
+		if !shouldRetryDownload(err) {
+			return hitRetryCycleStatus, fmt.Errorf("download image %q failed permanently: %w", imageURL, err)
+		}
+		if attempt == attemptsPerCycle {
+			return hitRetryCycleStatus, fmt.Errorf("download image %q failed after %d attempts: %w", imageURL, attemptsPerCycle, err)
+		}
+	}
+
+	return hitRetryCycleStatus, fmt.Errorf("download image %q failed after %d attempts", imageURL, attemptsPerCycle)
+}
+
+func waitForRetryCycle(ctx context.Context, waitFor time.Duration) error {
+	if waitFor > 0 {
+		if err := sleepWithContext(ctx, waitFor, "waiting before retry cycle"); err != nil {
+			return err
+		}
+	}
+	return wrapContextErr(ctx, "waiting before retry cycle")
+}
+
+func sleepWithContext(ctx context.Context, duration time.Duration, action string) error {
+	select {
+	case <-ctx.Done():
+		return wrapContextErr(ctx, action)
+	case <-time.After(duration):
+		return nil
+	}
+}
+
+func wrapContextErr(ctx context.Context, action string) error {
+	if err := ctx.Err(); err != nil {
+		return fmt.Errorf("%s: %w", action, err)
+	}
+	return nil
 }

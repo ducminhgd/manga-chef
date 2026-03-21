@@ -59,8 +59,8 @@ func readZipFile(t *testing.T, files []*zip.File, name string) string {
 		}
 		r, err := f.Open()
 		require.NoError(t, err)
-		defer r.Close()
 		data, err := io.ReadAll(r)
+		require.NoError(t, r.Close())
 		require.NoError(t, err)
 		return string(data)
 	}

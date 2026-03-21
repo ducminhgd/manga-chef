@@ -25,7 +25,7 @@ var (
 		".png":  {},
 		".webp": {},
 	}
-	chapterPattern = regexp.MustCompile(`(?i)^(?:chap(?:ter)?|ch)[-_ ]*([0-9]+(?:\.[0-9]+)?)$`)
+	chapterPattern = regexp.MustCompile(`(?i)^(?:chap(?:ter)?|ch)[-_ ]*(\d+(?:\.\d+)?)$`)
 )
 
 // Converter converts chapter image folders into EPUB files.
@@ -63,31 +63,16 @@ func (c *Converter) Convert(ctx context.Context, inputDir, outputPath string, op
 	defer func() { cleanup(tmpFiles) }()
 
 	for i, imgPath := range images {
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		default:
+		if err := wrapContextErr(ctx, "converting epub"); err != nil {
+			return err
 		}
 
-		sourcePath := imgPath
-		internalName := filepath.Base(imgPath)
-		actualExt, err := converter.DetectImageExtension(imgPath)
+		sourcePath, internalName, cleanupPath, err := prepareImage(imgPath, i+1)
 		if err != nil {
-			return fmt.Errorf("detecting image format for %q: %w", imgPath, err)
+			return err
 		}
-
-		if actualExt == ".webp" {
-			sourcePath, internalName, err = webpToTempPNG(imgPath, i+1)
-			if err != nil {
-				return fmt.Errorf("converting webp %q: %w", imgPath, err)
-			}
-			tmpFiles = append(tmpFiles, sourcePath)
-		} else if !strings.EqualFold(filepath.Ext(imgPath), actualExt) {
-			sourcePath, internalName, err = copyToTempWithExt(imgPath, i+1, actualExt)
-			if err != nil {
-				return fmt.Errorf("normalizing image extension for %q: %w", imgPath, err)
-			}
-			tmpFiles = append(tmpFiles, sourcePath)
+		if cleanupPath != "" {
+			tmpFiles = append(tmpFiles, cleanupPath)
 		}
 
 		internalImagePath, err := book.AddImage(sourcePath, internalName)
@@ -98,7 +83,7 @@ func (c *Converter) Convert(ctx context.Context, inputDir, outputPath string, op
 			book.SetCover(internalImagePath, "")
 		}
 
-		body := fmt.Sprintf(`<div><img src="%s" alt="Page %d" style="max-width: 100%%; height: auto;" /></div>`, internalImagePath, i+1)
+		body := fmt.Sprintf(`<div><img src=%q alt="Page %d" style="max-width: 100%%; height: auto;" /></div>`, internalImagePath, i+1)
 		if _, err := book.AddSection(body, fmt.Sprintf("Page %d", i+1), "", ""); err != nil {
 			return fmt.Errorf("adding section for %q: %w", imgPath, err)
 		}
@@ -111,6 +96,33 @@ func (c *Converter) Convert(ctx context.Context, inputDir, outputPath string, op
 		return fmt.Errorf("writing epub %q: %w", outputPath, err)
 	}
 	return nil
+}
+
+func prepareImage(imgPath string, idx int) (sourcePath, internalName, cleanupPath string, err error) {
+	sourcePath = imgPath
+	internalName = filepath.Base(imgPath)
+
+	actualExt, err := converter.DetectImageExtension(imgPath)
+	if err != nil {
+		return "", "", "", fmt.Errorf("detecting image format for %q: %w", imgPath, err)
+	}
+
+	switch {
+	case actualExt == ".webp":
+		sourcePath, internalName, err = webpToTempPNG(imgPath, idx)
+		if err != nil {
+			return "", "", "", fmt.Errorf("converting webp %q: %w", imgPath, err)
+		}
+		return sourcePath, internalName, sourcePath, nil
+	case strings.EqualFold(filepath.Ext(imgPath), actualExt):
+		return sourcePath, internalName, "", nil
+	default:
+		sourcePath, internalName, err = copyToTempWithExt(imgPath, idx, actualExt)
+		if err != nil {
+			return "", "", "", fmt.Errorf("normalizing image extension for %q: %w", imgPath, err)
+		}
+		return sourcePath, internalName, sourcePath, nil
+	}
 }
 
 type pathMetadata struct {
@@ -185,48 +197,48 @@ func collectImages(inputDir string) ([]string, error) {
 	return images, nil
 }
 
-func webpToTempPNG(path string, idx int) (string, string, error) {
+func webpToTempPNG(path string, idx int) (tmpPath, internalName string, err error) {
 	f, err := os.Open(path)
 	if err != nil {
-		return "", "", err
+		return "", "", fmt.Errorf("opening webp %q: %w", path, err)
 	}
 	defer f.Close()
 
 	img, err := webp.Decode(f)
 	if err != nil {
-		return "", "", err
+		return "", "", fmt.Errorf("decoding webp %q: %w", path, err)
 	}
 
 	tmp, err := os.CreateTemp("", "manga-chef-epub-*.png")
 	if err != nil {
-		return "", "", err
+		return "", "", fmt.Errorf("creating temp png for %q: %w", path, err)
 	}
 	defer tmp.Close()
 
 	if err := png.Encode(tmp, img); err != nil {
 		_ = os.Remove(tmp.Name())
-		return "", "", err
+		return "", "", fmt.Errorf("encoding png for %q: %w", path, err)
 	}
 	return tmp.Name(), fmt.Sprintf("%03d.png", idx), nil
 }
 
-func copyToTempWithExt(path string, idx int, ext string) (string, string, error) {
+func copyToTempWithExt(path string, idx int, ext string) (tmpPath, internalName string, err error) {
 	tmp, err := os.CreateTemp("", "manga-chef-epub-*"+ext)
 	if err != nil {
-		return "", "", err
+		return "", "", fmt.Errorf("creating temp file for %q: %w", path, err)
 	}
 	defer tmp.Close()
 
 	in, err := os.Open(path)
 	if err != nil {
 		_ = os.Remove(tmp.Name())
-		return "", "", err
+		return "", "", fmt.Errorf("opening %q: %w", path, err)
 	}
 	defer in.Close()
 
 	if _, err := io.Copy(tmp, in); err != nil {
 		_ = os.Remove(tmp.Name())
-		return "", "", err
+		return "", "", fmt.Errorf("copying %q into temp file: %w", path, err)
 	}
 	return tmp.Name(), fmt.Sprintf("%03d%s", idx, ext), nil
 }
@@ -235,4 +247,11 @@ func cleanup(paths []string) {
 	for _, path := range paths {
 		_ = os.Remove(path)
 	}
+}
+
+func wrapContextErr(ctx context.Context, action string) error {
+	if err := ctx.Err(); err != nil {
+		return fmt.Errorf("%s: %w", action, err)
+	}
+	return nil
 }

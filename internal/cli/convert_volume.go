@@ -170,10 +170,10 @@ func totalFileSize(paths []string) (int64, error) {
 	return total, nil
 }
 
-func planVolumes(chapters []chapterInfo, raw mergeLimits) ([]volumePlan, []string) {
+func planVolumes(chapters []chapterInfo, raw mergeLimits) (volumes []volumePlan, warnings []string) {
 	limits := normalizeMergeLimits(raw)
-	volumes := make([]volumePlan, 0)
-	warnings := make([]string, 0)
+	volumes = make([]volumePlan, 0)
+	warnings = make([]string, 0)
 
 	current := volumePlan{Index: 1, Chapters: make([]chapterInfo, 0)}
 	flush := func() {
@@ -185,7 +185,7 @@ func planVolumes(chapters []chapterInfo, raw mergeLimits) ([]volumePlan, []strin
 	}
 
 	for _, ch := range chapters {
-		if len(current.Chapters) > 0 && wouldExceed(current, ch, limits) {
+		if len(current.Chapters) > 0 && wouldExceed(current, &ch, limits) {
 			flush()
 		}
 
@@ -193,7 +193,7 @@ func planVolumes(chapters []chapterInfo, raw mergeLimits) ([]volumePlan, []strin
 		current.TotalPages += ch.Pages
 		current.TotalBytes += ch.SizeBytes
 
-		if len(current.Chapters) == 1 && chapterExceedsLimits(ch, limits) {
+		if len(current.Chapters) == 1 && chapterExceedsLimits(&ch, limits) {
 			warnings = append(warnings, fmt.Sprintf("chapter %q exceeds active limit(s); placed alone in volume %d", ch.Name, current.Index))
 			flush()
 		}
@@ -202,7 +202,7 @@ func planVolumes(chapters []chapterInfo, raw mergeLimits) ([]volumePlan, []strin
 	return volumes, warnings
 }
 
-func wouldExceed(v volumePlan, ch chapterInfo, l mergeLimits) bool {
+func wouldExceed(v volumePlan, ch *chapterInfo, l mergeLimits) bool {
 	nextPages := v.TotalPages + ch.Pages
 	nextChapters := len(v.Chapters) + 1
 	nextBytes := v.TotalBytes + ch.SizeBytes
@@ -219,7 +219,7 @@ func wouldExceed(v volumePlan, ch chapterInfo, l mergeLimits) bool {
 	return false
 }
 
-func chapterExceedsLimits(ch chapterInfo, l mergeLimits) bool {
+func chapterExceedsLimits(ch *chapterInfo, l mergeLimits) bool {
 	if l.MaxPages >= 0 && ch.Pages > l.MaxPages {
 		return true
 	}
@@ -260,12 +260,15 @@ func convertMangaRoot(
 		if err != nil {
 			return err
 		}
-		defer os.RemoveAll(tmpDir)
 
 		target := resolveVolumeOutputPath(outputPath, inputDir, format, volume.Index, len(volumes))
 		volTitle := volumeTitle(title, inputDir, volume.Index, len(volumes))
 		if err := conv.Convert(ctx, tmpDir, target, converter.Options{Title: volTitle}); err != nil {
+			_ = os.RemoveAll(tmpDir)
 			return fmt.Errorf("converting volume %d: %w", volume.Index, err)
+		}
+		if err := os.RemoveAll(tmpDir); err != nil {
+			return fmt.Errorf("removing temp volume %q: %w", tmpDir, err)
 		}
 		fmt.Fprintf(out, "Converted volume %03d -> %s (%s, %d chapters, %d pages)\n", volume.Index, target, format, len(volume.Chapters), volume.TotalPages)
 	}

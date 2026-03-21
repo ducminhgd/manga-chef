@@ -35,58 +35,15 @@ If --input points to a manga root (contains chapter sub-directories), output is 
 into one or more volume files based on merge limits.`,
 		Example: "manga-chef convert --input ./out/truyenqq/chap-001 --format epub --output ./out/chapter-001.epub",
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			outputPath := strings.TrimSpace(getOutputPath())
-			if strings.TrimSpace(inputDir) == "" {
-				return errors.New("--input is required")
-			}
-			if outputPath == "" {
-				return errors.New("--output is required")
-			}
-			if strings.TrimSpace(format) == "" {
-				return errors.New("--format is required")
-			}
-			formats, err := parseFormats(format)
-			if err != nil {
-				return err
-			}
-
-			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
-			defer cancel()
-
-			inputKind, err := convertInputKind(inputDir)
-			if err != nil {
-				return err
-			}
-			if inputKind == "chapter" {
-				for _, format := range formats {
-					conv, err := newConverterByFormat(format)
-					if err != nil {
-						return err
-					}
-					target := resolveChapterOutputPath(outputPath, format, len(formats))
-					if err := conv.Convert(ctx, inputDir, target, converter.Options{Title: title}); err != nil {
-						return fmt.Errorf("convert failed: %w", err)
-					}
-					fmt.Fprintf(cmd.OutOrStdout(), "Converted %s -> %s (%s)\n", filepath.Clean(inputDir), target, strings.ToLower(format))
-				}
-				return nil
-			}
-
-			limits := mergeLimits{
-				MaxFileSizeMB: maxSizeMB,
-				MaxPages:      maxPages,
-				MaxChapters:   maxChapters,
-			}
-			for _, format := range formats {
-				conv, err := newConverterByFormat(format)
-				if err != nil {
-					return err
-				}
-				if err := convertMangaRoot(ctx, conv, inputDir, outputPath, format, title, limits, cmd.OutOrStdout()); err != nil {
-					return fmt.Errorf("convert failed: %w", err)
-				}
-			}
-			return nil
+			return runConvertCmd(cmd, &convertCommandOptions{
+				inputDir:    inputDir,
+				outputPath:  strings.TrimSpace(getOutputPath()),
+				format:      format,
+				title:       title,
+				maxSizeMB:   maxSizeMB,
+				maxPages:    maxPages,
+				maxChapters: maxChapters,
+			})
 		},
 	}
 
@@ -97,6 +54,86 @@ into one or more volume files based on merge limits.`,
 	cmd.Flags().IntVar(&maxPages, "max-pages", defaultMaxPages, "Maximum pages per volume (-1 to disable)")
 	cmd.Flags().IntVar(&maxChapters, "max-chapters", defaultMaxChapters, "Maximum chapters per volume (-1 to disable)")
 	return cmd
+}
+
+type convertCommandOptions struct {
+	inputDir    string
+	outputPath  string
+	format      string
+	title       string
+	maxSizeMB   int
+	maxPages    int
+	maxChapters int
+}
+
+func runConvertCmd(cmd *cobra.Command, opts *convertCommandOptions) error {
+	if err := validateConvertOptions(opts); err != nil {
+		return err
+	}
+
+	formats, err := parseFormats(opts.format)
+	if err != nil {
+		return err
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+	defer cancel()
+
+	inputKind, err := convertInputKind(opts.inputDir)
+	if err != nil {
+		return err
+	}
+	if inputKind == "chapter" {
+		return convertSingleChapter(ctx, cmd, opts, formats)
+	}
+
+	limits := mergeLimits{
+		MaxFileSizeMB: opts.maxSizeMB,
+		MaxPages:      opts.maxPages,
+		MaxChapters:   opts.maxChapters,
+	}
+	return convertMangaVolumes(ctx, cmd, opts, formats, limits)
+}
+
+func validateConvertOptions(opts *convertCommandOptions) error {
+	if strings.TrimSpace(opts.inputDir) == "" {
+		return errors.New("--input is required")
+	}
+	if opts.outputPath == "" {
+		return errors.New("--output is required")
+	}
+	if strings.TrimSpace(opts.format) == "" {
+		return errors.New("--format is required")
+	}
+	return nil
+}
+
+func convertSingleChapter(ctx context.Context, cmd *cobra.Command, opts *convertCommandOptions, formats []string) error {
+	for _, format := range formats {
+		conv, err := newConverterByFormat(format)
+		if err != nil {
+			return err
+		}
+		target := resolveChapterOutputPath(opts.outputPath, format, len(formats))
+		if err := conv.Convert(ctx, opts.inputDir, target, converter.Options{Title: opts.title}); err != nil {
+			return fmt.Errorf("convert failed: %w", err)
+		}
+		fmt.Fprintf(cmd.OutOrStdout(), "Converted %s -> %s (%s)\n", filepath.Clean(opts.inputDir), target, strings.ToLower(format))
+	}
+	return nil
+}
+
+func convertMangaVolumes(ctx context.Context, cmd *cobra.Command, opts *convertCommandOptions, formats []string, limits mergeLimits) error {
+	for _, format := range formats {
+		conv, err := newConverterByFormat(format)
+		if err != nil {
+			return err
+		}
+		if err := convertMangaRoot(ctx, conv, opts.inputDir, opts.outputPath, format, opts.title, limits, cmd.OutOrStdout()); err != nil {
+			return fmt.Errorf("convert failed: %w", err)
+		}
+	}
+	return nil
 }
 
 func newConverterByFormat(format string) (converter.ConverterInterface, error) {

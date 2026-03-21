@@ -20,7 +20,7 @@ import (
 )
 
 var chapterNumRegex = regexp.MustCompile(`(?i)(?:chap(?:ter)?|ch(?:ương)?)[^0-9]*([0-9]+(?:\.[0-9]+)?)`)
-var chapterNumInURLRegex = regexp.MustCompile(`(?i)chap(?:ter)?[-_]?([0-9]+(?:\.[0-9]+)?)`)
+var chapterNumInURLRegex = regexp.MustCompile(`(?i)chap(?:ter)?[-_]?(\d+(?:\.\d+)?)`)
 
 const userAgentFallback = "Mozilla/5.0 (compatible; manga-chef/1.0; +https://github.com/ducminhgd/manga-chef)"
 
@@ -152,55 +152,59 @@ func (s *Scraper) GetImageURLs(ctx context.Context, chapterURL string) ([]string
 func (s *Scraper) fetchHTML(ctx context.Context, targetURL string) (*html.Node, error) {
 	backoffMs := int64(500)
 	for attempt := 0; attempt < 4; attempt++ {
-		req, err := http.NewRequestWithContext(ctx, http.MethodGet, targetURL, nil)
-		if err != nil {
-			return nil, fmt.Errorf("request new: %w", err)
+		doc, retry, err := s.fetchHTMLAttempt(ctx, targetURL, attempt)
+		if err == nil && !retry {
+			return doc, nil
 		}
-
-		for name, value := range s.cfg.Headers {
-			req.Header.Set(name, value)
+		if !retry {
+			return nil, err
 		}
-		if req.Header.Get("User-Agent") == "" {
-			req.Header.Set("User-Agent", userAgentFallback)
+		if err := waitForHTMLRetry(ctx, time.Duration(backoffMs)*time.Millisecond); err != nil {
+			return nil, err
 		}
-
-		resp, err := s.client.Do(req)
-		if err != nil {
-			return nil, fmt.Errorf("http GET %s: %w", targetURL, err)
-		}
-		defer resp.Body.Close()
-
-		if resp.StatusCode == http.StatusTooManyRequests {
-			if attempt == 3 {
-				body, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
-				return nil, fmt.Errorf("http GET %s: status %d, body: %s", targetURL, resp.StatusCode, strings.TrimSpace(string(body)))
-			}
-			select {
-			case <-ctx.Done():
-				return nil, ctx.Err()
-			case <-time.After(time.Duration(backoffMs) * time.Millisecond):
-			}
-			backoffMs *= 2
-			continue
-		}
-
-		if resp.StatusCode != http.StatusOK {
-			body, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
-			return nil, fmt.Errorf("http GET %s: status %d, body: %s", targetURL, resp.StatusCode, strings.TrimSpace(string(body)))
-		}
-
-		doc, err := html.Parse(resp.Body)
-		if err != nil {
-			return nil, fmt.Errorf("parsing html: %w", err)
-		}
-		return doc, nil
+		backoffMs *= 2
 	}
 	return nil, fmt.Errorf("http GET %s: retry attempts exhausted", targetURL)
 }
 
+func (s *Scraper) fetchHTMLAttempt(ctx context.Context, targetURL string, attempt int) (doc *html.Node, retry bool, err error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, targetURL, http.NoBody)
+	if err != nil {
+		return nil, false, fmt.Errorf("request new: %w", err)
+	}
+
+	for name, value := range s.cfg.Headers {
+		req.Header.Set(name, value)
+	}
+	if req.Header.Get("User-Agent") == "" {
+		req.Header.Set("User-Agent", userAgentFallback)
+	}
+
+	resp, err := s.client.Do(req)
+	if err != nil {
+		return nil, false, fmt.Errorf("http GET %s: %w", targetURL, err)
+	}
+	defer resp.Body.Close()
+
+	switch resp.StatusCode {
+	case http.StatusOK:
+		doc, err = html.Parse(resp.Body)
+		if err != nil {
+			return nil, false, fmt.Errorf("parsing html: %w", err)
+		}
+		return doc, false, nil
+	case http.StatusTooManyRequests:
+		if attempt == 3 {
+			return nil, false, readHTTPStatusError(targetURL, resp)
+		}
+		return nil, true, nil
+	default:
+		return nil, false, readHTTPStatusError(targetURL, resp)
+	}
+}
+
 func (s *Scraper) collectChapterAnchors(doc *html.Node, baseURL string) []*html.Node {
-	var container *html.Node
-	container = findFirstNode(doc, func(n *html.Node) bool {
+	var container *html.Node = findFirstNode(doc, func(n *html.Node) bool {
 		if n.Type != html.ElementNode {
 			return false
 		}
@@ -300,13 +304,30 @@ func findNodes(root *html.Node, pred func(*html.Node) bool) []*html.Node {
 func resolveURL(base, ref string) (string, error) {
 	parsedBase, err := url.Parse(base)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("parse base url %q: %w", base, err)
 	}
 	rel, err := url.Parse(ref)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("parse relative url %q: %w", ref, err)
 	}
 	return parsedBase.ResolveReference(rel).String(), nil
+}
+
+func readHTTPStatusError(targetURL string, resp *http.Response) error {
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 512))
+	if err != nil {
+		return fmt.Errorf("reading error response body: %w", err)
+	}
+	return fmt.Errorf("http GET %s: status %d, body: %s", targetURL, resp.StatusCode, strings.TrimSpace(string(body)))
+}
+
+func waitForHTMLRetry(ctx context.Context, backoff time.Duration) error {
+	select {
+	case <-ctx.Done():
+		return fmt.Errorf("retrying html fetch: %w", ctx.Err())
+	case <-time.After(backoff):
+		return nil
+	}
 }
 
 func parseChapterNumber(text string) (float64, bool) {

@@ -89,7 +89,7 @@ func runCommand(ctx context.Context, name string, args ...string) error {
 		if msg != "" {
 			return fmt.Errorf("%w: %s", err, msg)
 		}
-		return err
+		return fmt.Errorf("running %s: %w", name, err)
 	}
 	return nil
 }

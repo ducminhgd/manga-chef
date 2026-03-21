@@ -112,7 +112,9 @@ func defaultSourcesPath() string {
 	if _, err := os.Stat(localPath); err == nil {
 		return localPath
 	}
-	_ = os.MkdirAll(localPath, 0o755)
+	if err := os.MkdirAll(localPath, 0o755); err != nil {
+		return localPath
+	}
 	return localPath
 }
 

@@ -19,7 +19,7 @@ import (
 )
 
 var chapterNumRegex = regexp.MustCompile(`(?i)(?:chap(?:ter)?|ch(?:ương)?)[^0-9]*([0-9]+(?:\.[0-9]+)?)`)
-var chapterNumInURLRegex = regexp.MustCompile(`(?i)chap(?:ter)?[-_]?([0-9]+(?:\.[0-9]+)?)`)
+var chapterNumInURLRegex = regexp.MustCompile(`(?i)chap(?:ter)?[-_]?(\d+(?:\.\d+)?)`)
 
 const userAgentFallback = "Mozilla/5.0 (compatible; manga-chef/1.0; +https://github.com/ducminhgd/manga-chef)"
 
@@ -85,42 +85,11 @@ func (s *Scraper) GetChapterList(ctx context.Context, mangaURL string) ([]source
 	seen := make(map[string]struct{})
 
 	selection.Each(func(i int, sel *goquery.Selection) {
-		anchor := sel
-		if goquery.NodeName(sel) != "a" {
-			a := sel.Find("a").First()
-			if a.Length() > 0 {
-				anchor = a
-			}
-		}
-
-		href, ok := anchor.Attr("href")
-		if !ok || strings.TrimSpace(href) == "" {
-			return
-		}
-
-		abs, err := resolveURL(mangaURL, href)
-		if err != nil {
-			return
-		}
-		if _, dup := seen[abs]; dup {
-			return
-		}
-		seen[abs] = struct{}{}
-
-		title := strings.TrimSpace(anchor.Text())
-		number, ok := s.parseChapterNumber(sel, anchor)
-		if !ok {
-			number, ok = parseChapterNumberFromURL(abs)
-		}
+		chapter, ok := s.chapterFromSelection(sel, mangaURL, seen)
 		if !ok {
 			return
 		}
-
-		if title == "" {
-			title = fmt.Sprintf("Chap %.1f", number)
-		}
-
-		chapters = append(chapters, sources.Chapter{Number: number, Title: title, URL: abs})
+		chapters = append(chapters, chapter)
 	})
 
 	sort.SliceStable(chapters, func(i, j int) bool {
@@ -131,6 +100,48 @@ func (s *Scraper) GetChapterList(ctx context.Context, mangaURL string) ([]source
 	})
 
 	return chapters, nil
+}
+
+func (s *Scraper) chapterFromSelection(sel *goquery.Selection, mangaURL string, seen map[string]struct{}) (sources.Chapter, bool) {
+	anchor := firstAnchor(sel)
+	href, ok := anchor.Attr("href")
+	if !ok || strings.TrimSpace(href) == "" {
+		return sources.Chapter{}, false
+	}
+
+	abs, err := resolveURL(mangaURL, href)
+	if err != nil {
+		return sources.Chapter{}, false
+	}
+	if _, dup := seen[abs]; dup {
+		return sources.Chapter{}, false
+	}
+	seen[abs] = struct{}{}
+
+	number, ok := s.parseChapterNumber(sel, anchor)
+	if !ok {
+		number, ok = parseChapterNumberFromURL(abs)
+	}
+	if !ok {
+		return sources.Chapter{}, false
+	}
+
+	title := strings.TrimSpace(anchor.Text())
+	if title == "" {
+		title = fmt.Sprintf("Chap %.1f", number)
+	}
+
+	return sources.Chapter{Number: number, Title: title, URL: abs}, true
+}
+
+func firstAnchor(sel *goquery.Selection) *goquery.Selection {
+	if goquery.NodeName(sel) == "a" {
+		return sel
+	}
+	if anchor := sel.Find("a").First(); anchor.Length() > 0 {
+		return anchor
+	}
+	return sel
 }
 
 // GetImageURLs fetches image URLs from a chapter page using configured selectors.
@@ -263,7 +274,7 @@ func parseChapterNumberFromURL(urlStr string) (float64, bool) {
 }
 
 func (s *Scraper) fetchHTML(ctx context.Context, targetURL string) (*goquery.Document, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, targetURL, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, targetURL, http.NoBody)
 	if err != nil {
 		return nil, fmt.Errorf("request new: %w", err)
 	}
@@ -282,7 +293,10 @@ func (s *Scraper) fetchHTML(ctx context.Context, targetURL string) (*goquery.Doc
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
+		body, readErr := io.ReadAll(io.LimitReader(resp.Body, 512))
+		if readErr != nil {
+			return nil, fmt.Errorf("reading error response body: %w", readErr)
+		}
 		return nil, fmt.Errorf("http GET %s: status %d, body: %s", targetURL, resp.StatusCode, strings.TrimSpace(string(body)))
 	}
 
@@ -296,11 +310,11 @@ func (s *Scraper) fetchHTML(ctx context.Context, targetURL string) (*goquery.Doc
 func resolveURL(base, ref string) (string, error) {
 	parsedBase, err := url.Parse(base)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("parse base url %q: %w", base, err)
 	}
 	rel, err := url.Parse(ref)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("parse relative url %q: %w", ref, err)
 	}
 	return parsedBase.ResolveReference(rel).String(), nil
 }

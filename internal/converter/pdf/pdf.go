@@ -71,33 +71,16 @@ func (c *Converter) Convert(ctx context.Context, inputDir, outputPath string, op
 	defer func() { cleanup(tmpFiles) }()
 
 	for _, imgPath := range images {
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		default:
+		if err := wrapContextErr(ctx, "converting pdf"); err != nil {
+			return err
 		}
 
-		pathToEmbed := imgPath
-		actualExt, err := converter.DetectImageExtension(imgPath)
+		pathToEmbed, cleanupPath, err := preparePDFImage(imgPath)
 		if err != nil {
-			return fmt.Errorf("detecting image format %q: %w", imgPath, err)
+			return err
 		}
-
-		switch actualExt {
-		case ".webp":
-			pathToEmbed, err = webpToTempPNG(imgPath)
-			if err != nil {
-				return fmt.Errorf("converting webp %q: %w", imgPath, err)
-			}
-			tmpFiles = append(tmpFiles, pathToEmbed)
-		default:
-			if !strings.EqualFold(filepath.Ext(imgPath), actualExt) {
-				pathToEmbed, err = copyToTempWithExt(imgPath, actualExt)
-				if err != nil {
-					return fmt.Errorf("normalizing image extension for %q: %w", imgPath, err)
-				}
-				tmpFiles = append(tmpFiles, pathToEmbed)
-			}
+		if cleanupPath != "" {
+			tmpFiles = append(tmpFiles, cleanupPath)
 		}
 
 		cfg, err := imageConfig(pathToEmbed)
@@ -117,6 +100,30 @@ func (c *Converter) Convert(ctx context.Context, inputDir, outputPath string, op
 		return fmt.Errorf("writing pdf %q: %w", outputPath, err)
 	}
 	return nil
+}
+
+func preparePDFImage(imgPath string) (pathToEmbed, cleanupPath string, err error) {
+	actualExt, err := converter.DetectImageExtension(imgPath)
+	if err != nil {
+		return "", "", fmt.Errorf("detecting image format %q: %w", imgPath, err)
+	}
+
+	switch {
+	case actualExt == ".webp":
+		pathToEmbed, err = webpToTempPNG(imgPath)
+		if err != nil {
+			return "", "", fmt.Errorf("converting webp %q: %w", imgPath, err)
+		}
+		return pathToEmbed, pathToEmbed, nil
+	case strings.EqualFold(filepath.Ext(imgPath), actualExt):
+		return imgPath, "", nil
+	default:
+		pathToEmbed, err = copyToTempWithExt(imgPath, actualExt)
+		if err != nil {
+			return "", "", fmt.Errorf("normalizing image extension for %q: %w", imgPath, err)
+		}
+		return pathToEmbed, pathToEmbed, nil
+	}
 }
 
 func collectImages(inputDir string) ([]string, error) {
@@ -143,17 +150,17 @@ func collectImages(inputDir string) ([]string, error) {
 func imageConfig(path string) (image.Config, error) {
 	f, err := os.Open(path)
 	if err != nil {
-		return image.Config{}, err
+		return image.Config{}, fmt.Errorf("opening image %q: %w", path, err)
 	}
 	defer f.Close()
 	cfg, _, err := image.DecodeConfig(f)
 	if err != nil {
-		return image.Config{}, err
+		return image.Config{}, fmt.Errorf("decoding image config %q: %w", path, err)
 	}
 	return cfg, nil
 }
 
-func fitWithinLetter(imgW, imgH float64) (float64, float64) {
+func fitWithinLetter(imgW, imgH float64) (width, height float64) {
 	if imgW <= 0 || imgH <= 0 {
 		return letterWidthInPt, letterHeightInPt
 	}
@@ -164,24 +171,24 @@ func fitWithinLetter(imgW, imgH float64) (float64, float64) {
 func webpToTempPNG(path string) (string, error) {
 	f, err := os.Open(path)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("opening webp %q: %w", path, err)
 	}
 	defer f.Close()
 
 	img, err := webp.Decode(f)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("decoding webp %q: %w", path, err)
 	}
 
 	tmp, err := os.CreateTemp("", "manga-chef-*.png")
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("creating temp png for %q: %w", path, err)
 	}
 	defer tmp.Close()
 
 	if err := png.Encode(tmp, img); err != nil {
 		_ = os.Remove(tmp.Name())
-		return "", err
+		return "", fmt.Errorf("encoding png for %q: %w", path, err)
 	}
 	return tmp.Name(), nil
 }
@@ -189,20 +196,20 @@ func webpToTempPNG(path string) (string, error) {
 func copyToTempWithExt(src, ext string) (string, error) {
 	tmp, err := os.CreateTemp("", "manga-chef-*"+ext)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("creating temp file for %q: %w", src, err)
 	}
 	defer tmp.Close()
 
 	in, err := os.Open(src)
 	if err != nil {
 		_ = os.Remove(tmp.Name())
-		return "", err
+		return "", fmt.Errorf("opening %q: %w", src, err)
 	}
 	defer in.Close()
 
 	if _, err := io.Copy(tmp, in); err != nil {
 		_ = os.Remove(tmp.Name())
-		return "", err
+		return "", fmt.Errorf("copying %q into temp file: %w", src, err)
 	}
 	return tmp.Name(), nil
 }
@@ -211,4 +218,11 @@ func cleanup(paths []string) {
 	for _, path := range paths {
 		_ = os.Remove(path)
 	}
+}
+
+func wrapContextErr(ctx context.Context, action string) error {
+	if err := ctx.Err(); err != nil {
+		return fmt.Errorf("%s: %w", action, err)
+	}
+	return nil
 }
